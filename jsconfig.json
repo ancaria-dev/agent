@@ -1,0 +1,33 @@
+{
+    // The agent is not an application. tools/build.ps1 concatenates every file
+    // under src/ in file-name order into one script and Frida injects it into
+    // the game, where it runs on QuickJS.
+    //
+    // Three consequences the editor has to be told about:
+    //
+    //   * "module": "none" -- the files share one global scope. `base` and
+    //     `hook` come from 10-core.js, `RVA` from src/gen/addr.js, and every
+    //     later file uses them without declaring anything. Under "none" the
+    //     language service resolves those across files instead of treating each
+    //     file as its own module, and a top-level `import`/`export` typed by
+    //     mistake is reported immediately rather than at injection time.
+    //
+    //   * no "dom" in "lib" -- QuickJS has no window, no document, no fetch and
+    //     no localStorage. Leaving the DOM out means the editor does not offer
+    //     them.
+    //
+    //   * "checkJs": false -- Frida's own globals (Interceptor, Process, ptr,
+    //     send, recv, console) come from the injector, not from any package.
+    //     Without @types/frida-gum they cannot be resolved, and this repository
+    //     has no npm setup to install it into; checking would paint every hook
+    //     red for no gain.
+    "compilerOptions": {
+        "module": "none",
+        "target": "es2020",
+        "lib": ["es2020"],
+        "checkJs": false,
+        "noEmit": true
+    },
+    // src/gen/addr.js is included on purpose: it declares RVA.
+    "include": ["src/**/*.js"]
+}
