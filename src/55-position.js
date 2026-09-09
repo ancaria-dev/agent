@@ -1,5 +1,5 @@
 // Position.  The HUD number is trunc(world / 53.66563), the divisor being a
-// float in the PE that the game's own converter reads -- so it is read from
+// float in the PE that the game's own converter reads, so it is read from
 // there rather than hardcoded.
 //
 // There is no cheap "player moved" writer: full+0x1C is sampled instead, at
@@ -41,7 +41,7 @@ hook("posHero", RVA.getLocalHero, {
 });
 
 // The world->HUD converter, but only when it is converting OUR coordinates
-// (arg0 == hero+0x18); it runs for other objects too.
+// (arg0 == hero+0x18).  It runs for other objects too.
 hook("posConvert", RVA.posConvert, {
     onEnter: function () {
         this.mine = false;
@@ -60,7 +60,7 @@ hook("posConvert", RVA.posConvert, {
     }
 });
 
-// Camera pan. Its arguments are NOT player coordinates -- it is only a cue to
+// Camera pan. Its arguments are NOT player coordinates.  It is only a cue to
 // resample, because inventory nudges the view without moving the hero.
 hook("posCamera", RVA.posCamera, {
     onEnter: function () {

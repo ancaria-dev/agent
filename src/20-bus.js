@@ -1,8 +1,8 @@
 // The wire to the host.  Two directions:
-//   evt(...)  fire-and-forget, never blocks the game thread;
+//   evt(...)  fire-and-forget, never blocks the game thread.
 //   ask(...)  blocks until the host answers with a verdict.
 //
-// The payload field names (type/id/result/returns) are not ours -- they are
+// The payload field names (type/id/result/returns) are not ours.  They are
 // what frida-rust's SendPayload deserializes.  Keeping that shape avoids a
 // fallback parse path on the host side.
 
@@ -18,7 +18,7 @@ function note(text) {
     send({ type: "log", id: 0, result: text, returns: {} });
 }
 
-// Returns { cancel: bool, set: {...} }.  The host always answers -- it applies
+// Returns { cancel: bool, set: {...} }.  The host always answers.  It applies
 // its own deadline and replies on the mod's behalf if Coderpack is slow or gone, so
 // this loop cannot hang the game as long as the host is alive.
 function ask(name, fields) {
@@ -26,7 +26,7 @@ function ask(name, fields) {
         return { cancel: false, set: {} };
     }
     // Never stop the game thread while it is loading.  The mod still sees the
-    // event, it just cannot answer it -- which is the right trade: nobody wants
+    // event, it just cannot answer it, which is the right trade: nobody wants
     // to multiply a character's starting gold anyway.
     if (isLoading()) {
         evt(name, fields || {});
@@ -70,7 +70,7 @@ function armCommands() {
     recv("cmd", function (msg) {
         // Flat, because the wire is flat.  This used to send { ok, f: {...} }
         // and the host's flatten() turned the inner object into one field
-        // holding JSON -- so every command answered `ok=1 f={"gold":104233}`
+        // holding JSON, so every command answered `ok=1 f={"gold":104233}`
         // and Coderpack's .get("gold") was null.  Nothing failed loudly: the callers
         // all had a fallback, so uiString() simply always returned null.
         var out;

@@ -50,18 +50,18 @@ function syncMirrors() {
 // Four mid-function sites in this one function have now crashed the game on
 // world load, and the crash address finally named the damage: 0x005805E9, in
 // AddGold's caller 0x005803C0, is `cmp [edx+0xc], eax` with edx = [edi+4].  EDI
-// is callee-saved and valid before the call -- the same dereference succeeds at
-// the top of that function -- so AddGold was returning with EDI destroyed.  A
+// is callee-saved and valid before the call, and the same dereference succeeds
+// at the top of that function, so AddGold was returning with EDI destroyed.  A
 // hook that corrupts a saved register is a broken trampoline, not a broken
 // boost, which is why turning the boost off never helped.
 //
-// Which mid-function detail did it is not proven; the last two sites to fail
+// Which mid-function detail did it is not proven.  The last two sites to fail
 // were both ESP-relative (`mov eax,[esp+0x94]` here, `mov ecx,[esp+0x84]` at
 // the epilogue), which is suspicious but two cases is not a mechanism.
 //
 // The entry sidesteps the whole question.  It is the case Frida is built for:
 // a real return address, and a relocated `mov eax, fs:[0]` that touches neither
-// the stack nor the flags.  Nothing is lost by moving -- ECX is still the sheet
+// the stack nor the flags.  Nothing is lost by moving.  ECX is still the sheet
 // and args[0] is the very same dword as [esp+0x94] was, because the prologue
 // pushes exactly 0x90 bytes between them.
 hook("goldDelta", RVA.goldDelta, {
@@ -96,8 +96,8 @@ hook("goldDelta", RVA.goldDelta, {
 
 // Everything after the boost happens on the tick instead of on its own hook.
 //
-// Three sites used to live here -- the write, the sheet/full sync and the
-// epilogue -- and each one crashed the game in its own way: the write split a
+// Three sites used to live here: the write, the sheet/full sync and the
+// epilogue.  Each one crashed the game in its own way.  The write split a
 // `cmp` from its `je`, and the other two sat mid-function on instructions whose
 // relocation the trampoline could not be trusted with (one of them reads the
 // stack through ESP).  None of them had to be a hook: the total is a number

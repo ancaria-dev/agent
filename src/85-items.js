@@ -1,7 +1,7 @@
 // Items: picked up, stored, equipped, dragged.
 //
 // Everything here addresses an item by its object-manager `ref`, never by its
-// address -- the heap moves every launch, the ref does not move within a
+// address.  The heap moves every launch, the ref does not move within a
 // session, and it is what the game's own functions take.
 //
 // The pickup event is the one place in Coderpack where a mod can veto AND redirect,
@@ -25,10 +25,10 @@ var ITEM = {
     modIds: 0x162,
     modValues: 0x182,
     // A SECOND copy of the type id, and the reason retyping was cosmetic: we
-    // wrote +0x10, the game kept reading this one.  Confirmed on four items --
-    // two runes and two potions -- where it equalled +0x10 exactly.
+    // wrote +0x10, the game kept reading this one.  Confirmed on four items,
+    // two runes and two potions, where it equalled +0x10 exactly.
     type2: 0x118,
-    // Base value.  Small red potion 400, large red 1200, exactly 3x; runes 5
+    // Base value.  Small red potion 400, large red 1200, exactly 3x.  Runes 5
     // and 6.  The displayed price is derived from it (it moves with charisma),
     // which is why nothing changed when only the type did.
     price: 0x120
@@ -57,7 +57,7 @@ function readMods(obj) {
     return pairs.join(",");
 }
 
-// Replaces the whole list, clearing the slots past it -- "the modifiers are
+// Replaces the whole list, clearing the slots past it: "the modifiers are
 // exactly these".  UNVERIFIED against the game: reading these is confirmed,
 // writing them is not, so treat a changed tooltip as the first evidence.
 function writeMods(obj, packed) {
@@ -123,7 +123,7 @@ function itemFields(ref) {
             pct: obj.add(ITEM.percent).readU8(),
             price: obj.add(ITEM.price).readU32() >>> 0,
             mods: readMods(obj),
-            // Only when the two copies disagree -- which on an untouched item
+            // Only when the two copies disagree, which on an untouched item
             // they never do, so seeing this field at all means something wrote
             // one of them.
             type2: (obj.add(ITEM.type2).readU32() >>> 0) === typeId
@@ -137,14 +137,14 @@ function itemFields(ref) {
 
 // Rewriting an item in place.
 //
-// The type id at +0x10 is what everything else about an item is looked up from
-// -- its name, its sprite, what it does when used -- so writing it turns one
+// The type id at +0x10 is what everything else about an item is looked up
+// from: its name, its sprite, what it does when used.  Writing it turns one
 // item into another.  The display NAME cannot be set: Sacred composes it from
 // affixes at draw time, so the type is the only handle, and changing it changes
 // the name as a consequence.
 //
 // The other mapped fields (level, attack, protection) are plain bytes and are
-// writable the same way; they are exposed through the same command so a mod
+// writable the same way.  They are exposed through the same command so a mod
 // does not need a new one per field.
 var WRITABLE = { level: [ITEM.level, 1], min: [ITEM.minLevel, 1],
                  atk: [ITEM.attack, 1], pct: [ITEM.percent, 1],
@@ -158,7 +158,7 @@ function reshape(ref, changes) {
     var wrote = false;
     // "The type" is both copies.  Writing one and not the other is what made
     // the first attempt a reskin, so a caller never gets to do that by
-    // accident -- there is one `type` field and it means both.
+    // accident.  There is one `type` field and it means both.
     if (changes.type !== undefined) {
         var typeId = parseInt(changes.type, 10);
         if (!isNaN(typeId)) {
@@ -211,7 +211,7 @@ command("item.reshape", function (f) {
 });
 
 // thiscall(creature)(int ref, ...).  ECX is the creature doing the picking up,
-// which is how the hero is told apart from an NPC -- and only the hero's
+// which is how the hero is told apart from an NPC, and only the hero's
 // pickups are asked about.  The other three call sites are creature AI and
 // their rate has never been measured, so they observe and move on rather than
 // stop the game thread on a mob bending down.
@@ -238,7 +238,7 @@ hook("itemPickup", RVA.itemPickup, {
         // Two different powers, and they compose in this order: `ref` chooses
         // WHICH object is picked up, `type` (and the other fields) change the
         // one that ends up being picked up.  Swapping the ref affects this call
-        // only; reshaping edits the world object and outlives it.
+        // only.  Reshaping edits the world object and outlives it.
         var swapped = asked(verdict, "ref", ref);
         if (swapped !== ref) {
             // A ref that resolves to nothing is not an error to guard against:
@@ -278,7 +278,7 @@ hook("itemEquip", RVA.itemEquip, {
     }
 });
 
-// thiscall(inventory)(u16 src, u16 dst) -- grid slots, no item identity on this
+// thiscall(inventory)(u16 src, u16 dst): grid slots, no item identity on this
 // path.  Kept because it is the only signal that the player rearranged a bag.
 hook("itemMove", RVA.itemMove, {
     onEnter: function (args) {

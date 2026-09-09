@@ -1,5 +1,5 @@
 // Skills.  Every slot goes through ONE generic write, so a single hook covers
-// all of them -- but NOT at the write itself.
+// all of them, but NOT at the write itself.
 //
 // `mov [eax+edi+0x2c], cl` at +0x1827DA is four bytes long, so Frida's five-byte
 // trampoline spills onto the next instruction, and two jumps from the

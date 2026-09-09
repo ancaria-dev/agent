@@ -60,7 +60,7 @@ function attachHp(name, rva, opts) {
 
         if (!isHeroSheet(sheet)) {
             // Same layout for every creature, so a hit on a mob is reported
-            // rather than dropped -- this is what makes Player : Entity real.
+            // rather than dropped.  This is what makes Player : Entity real.
             entityHp(sheet, next, kind || hpKind(next), damage);
             return;
         }

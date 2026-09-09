@@ -1,4 +1,4 @@
-// Experience.  EAX holds the new total, ESI the gain, EBX the sheet -- so the
+// Experience.  EAX holds the new total, ESI the gain, EBX the sheet, so the
 // gain is recovered by subtraction and the total is what gets rewritten.
 // The game clamps the total to 0x9A31718F itself, but a boosted value can still
 // overflow int32 on the way there, so asked() caps it.

@@ -3,10 +3,10 @@
 // mid-load.  Every legitimate change instead passes through the cold grant/
 // spend dispatcher, so that is where Coderpack sits.
 //
-// There is no register to rewrite here -- the value is written inside the call.
+// There is no register to rewrite here.  The value is written inside the call.
 // So the verdict is applied the only honest way: read what the game committed,
 // then write the value the mod asked for.  A verdict does not have to be a
-// register swap; it has to be applied before anything else observes the field.
+// register swap.  It has to be applied before anything else observes the field.
 
 var ATTR_OFFSETS = [0x10, 0x12, 0x14, 0x16, 0x18, 0x1A];
 var ATTR_NAMES = ["Strength", "Endurance", "Dexterity",
@@ -37,7 +37,7 @@ hook("statGrant", RVA.statGrant, {
         }
         this.sheet = snapPtr(ctx.ecx);
         // Stack arg: 0..5 spends a point on that attribute, 7 is the level-up
-        // reward.  It is not a level writer -- treating it as one made every
+        // reward.  It is not a level writer, and treating it as one made every
         // Strength click look like a level-up.
         this.reason = ctx.esp.add(4).readU32() >>> 0;
         this.points = readPoints();

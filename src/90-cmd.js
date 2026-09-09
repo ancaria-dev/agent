@@ -1,12 +1,12 @@
 // Commands: the direction where a mod acts instead of reacting.
 //
 // Where the game has its own primitive, Coderpack calls it rather than writing the
-// field -- the engine then updates whatever caches and mirrors it keeps, and
+// field.  The engine then updates whatever caches and mirrors it keeps, and
 // the result matches the UI by construction.  Direct writes are used only where
 // no primitive was found (position).
 //
 // thiscall in Frida takes `this` as the FIRST declared argument, not via
-// .call() -- getting that wrong yields an access violation at a nonsense
+// .call(), and getting that wrong yields an access violation at a nonsense
 // address.
 
 var setCreatureStat = new NativeFunction(at(RVA.setCreatureStat), "void",
@@ -49,7 +49,7 @@ command("player.exp", function (f) {
 });
 
 // No callable AddGold entry is mapped yet, so both copies are written and the
-// anti-cheat mirrors refreshed -- otherwise the checker resets the field to 1.
+// anti-cheat mirrors refreshed, or the checker resets the field to 1.
 command("player.gold", function (f) {
     requireHero();
     var value = parseInt(f.value, 10);

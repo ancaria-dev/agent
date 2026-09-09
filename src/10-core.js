@@ -2,7 +2,7 @@
 //
 // Two rules learned the hard way and enforced here:
 //   * a NativePointer taken from a register or retval can alias the live
-//     register -- snapshot it with snapPtr before storing;
+//     register, so snapshot it with snapPtr before storing.
 //   * the game keeps the hero as a "sheet" struct embedded in a bigger object
 //     at +0x3A8, and combat code hands out the sheet while stat code hands out
 //     the full object, so both pointers are kept and derived from each other.
@@ -35,8 +35,8 @@ var base = gameMod.base;
 
 // Refuse to install on top of another Coderpack.  A globalThis flag cannot do this:
 // every Frida script gets its own JS runtime, so the second injection would see
-// a clean scope and hook the same instructions a second time -- every boost
-// applied twice, silently.
+// a clean scope and hook the same instructions a second time, applying every
+// boost twice, silently.
 //
 // What is actually shared is the game's code, so that is what gets checked: an
 // inline hook overwrites the instruction with a relative jump.  This can miss an
@@ -54,21 +54,21 @@ if (alreadyHooked(RVA.hpDamage) || alreadyHooked(RVA.goldDelta)) {
 
 // Is this the build the addresses came from?  The executable lookup takes the
 // first of three names, so a stock Sacred.exe or a differently-versioned wrapper
-// attaches perfectly well and then gets pureHD RVAs applied to it -- hooks that
+// attaches perfectly well and then gets pureHD RVAs applied to it, so hooks
 // land in the middle of some other function, silently.
 //
 // What is checked is the code itself, not the version resource.  The question
 // worth answering is whether these addresses still mean what they meant, and
 // the bytes at the sites answer it directly: the stock Sacred.exe differs at all
 // twenty of them.  Version metadata answers something narrower and does it
-// badly here -- pureHD.exe carries the stock game's OriginalFilename and spells
-// its FileVersion "2.28" while the fixed block says 2.0.2.118 -- and reading it
+// badly here.  pureHD.exe carries the stock game's OriginalFilename and spells
+// its FileVersion "2.28" while the fixed block says 2.0.2.118, and reading it
 // from in here means parsing the mapped resource directory of a binary we have
 // just decided we do not recognise.
 //
 // The image has its relocations stripped and no /DYNAMICBASE, so it always
 // loads at 0x00400000 and these bytes are the file's bytes.  BUILD comes from
-// gen/addr.js; an agent bundled without one skips the check rather than
+// gen/addr.js.  An agent bundled without one skips the check rather than
 // refusing to load.
 function siteBytesMatch(rva, hex) {
     var site = base.add(rva);
@@ -207,8 +207,8 @@ function noteHeroFull(full) {
 
 // Is the game busy loading?  Asking a mod for a verdict stops the game thread
 // until the answer comes back, and doing that inside world/hero load is how the
-// process dies: gold is handed out during load, so the gold hook -- the only
-// ASK site that fires there -- crashed every fresh start while attaching to an
+// process dies: gold is handed out during load, so the gold hook, the only
+// ASK site that fires there, crashed every fresh start while attaching to an
 // already-loaded world was fine.  The window is tracked here rather than in the
 // session module so it holds even when that module is not loaded.
 // Every Interceptor goes through here so a single site can be disabled from
@@ -229,7 +229,7 @@ function hook(name, rva, callbacks) {
     }
     if (TRACE) {
         // console.log reaches the host as a log message, which it prints as it
-        // arrives -- so when the game dies, the last line names the hook that
+        // arrives, so when the game dies, the last line names the hook that
         // was running.  A crash that kills the process leaves no other trace.
         var body = callbacks.onEnter;
         var after = callbacks.onLeave;
@@ -243,7 +243,7 @@ function hook(name, rva, callbacks) {
         };
         // Only if the hook already had one.  Adding an onLeave to a
         // mid-function site makes Frida track a return address that is not
-        // there -- the tracing would cause the very crash it is looking for.
+        // there, and the tracing would cause the very crash it is looking for.
         if (after) {
             traced.onLeave = function (retval) {
                 after.call(this, retval);

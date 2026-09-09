@@ -2,7 +2,7 @@
 //
 // The write itself (+0x185EBE, `mov [ebx+0x56], ax`) looks like an ideal hook
 // site and is not one.  Attaching there killed the game on every load from a
-// save, while a fresh level-1 character was fine -- so it was never the boost or
+// save, while a fresh level-1 character was fine, so it was never the boost or
 // the gate, both of which do the same thing either way.
 //
 // The shape around it is the one that has now failed three times.  The
@@ -11,13 +11,13 @@
 // bytes later by `cmp [edx+0xc], 0x10`.  Gold died twice on exactly that: a
 // short mid-function site with a scratch register loaded before it and consumed
 // after.  What the trampoline actually does to that register is not proven, and
-// three cases is a pattern rather than a mechanism -- but it is enough to stop
+// three cases is a pattern rather than a mechanism, but it is enough to stop
 // choosing sites like this one.
 //
-// Nothing is lost by moving.  The level was already report-only -- it is one of
+// Nothing is lost by moving.  The level was already report-only: it is one of
 // the fields the anti-cheat mirrors XOR-encoded, and it drives the grant tables,
-// so rewriting it would desync both -- and a number that only has to be noticed
-// can be noticed a few milliseconds later.
+// so rewriting it would desync both.  A number that only has to be noticed can
+// be noticed a few milliseconds later.
 var lastLevel = 0;
 
 onTick(function () {
@@ -41,7 +41,7 @@ onTick(function () {
     // The game's level-up loop runs to completion inside addExperience, so a
     // big grant is already several levels by the time the tick sees it.  Those
     // levels really did happen, and a mod that rewards one per level should get
-    // one per level -- so the gap is reported step by step rather than as a
+    // one per level, so the gap is reported step by step rather than as a
     // single jump from 20 to 35.
     while (lastLevel < now) {
         evt("level.changed", { prev: lastLevel, next: lastLevel + 1 });

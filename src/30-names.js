@@ -70,7 +70,7 @@ function uiString(key) {
 // "TYPE_OBJECT_POTION_SMALL_RED" says what it is.  The game has no reverse
 // lookup, so one is built by asking typeName for every id once and keeping what
 // answers.  It costs a few thousand table lookups, on the Frida thread, once
-// per session -- and only if some mod actually asks.
+// per session, and only if some mod actually asks.
 //
 // Ids are bounds-checked inside typeName (`cmp ecx, edx / jge` against the
 // table length), so an id past the end returns its "Bad Item" record rather
@@ -116,7 +116,7 @@ command("type.list", function (f) {
 });
 
 // Hero classes: full+0x10 is 1..9 for heroes and a creature type id for
-// everything else -- the same field, which is what makes Player : Entity work.
+// everything else, the same field, which is what makes Player : Entity work.
 var CLASSES = {
     1: "Seraphim", 2: "Gladiator", 3: "Battlemage", 4: "DarkElf",
     5: "WoodElf", 6: "Vampiress", 7: "VampiressForm", 8: "Dwarf", 9: "Daemon"

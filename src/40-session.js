@@ -55,7 +55,7 @@ function heroState() {
             y: heroFull.add(0x20).readS32()
         };
     } catch (e) {
-        // The hero went away underneath us; the terminate hook will say so.
+        // The hero went away underneath us.  The terminate hook will say so.
         heroFull = null;
         heroSheet = null;
         return {};
