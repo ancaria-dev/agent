@@ -95,15 +95,14 @@ function attachHp(name, rva, opts) {
             if (committed !== next) {
                 ctx[opts.valueReg] = ptr(committed);
             }
-        } else {
-            evt("health.changing", {
-                kind: kind, damage: damage,
-                prev: prev, next: next, max: maxHp
-            });
         }
 
+        // One report per write, after any verdict.  A separate "changing"
+        // event used to precede this at the three sites nobody can decide,
+        // carrying the same numbers plus the damage, so the damage rides here.
         evt("health.changed", {
-            kind: kind, prev: prev, next: committed, max: maxHp
+            kind: kind, damage: damage,
+            prev: prev, next: committed, max: maxHp
         });
         entityHp(sheet, committed, kind, damage);
 
