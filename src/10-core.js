@@ -177,6 +177,22 @@ function objectByRef(ref) {
     }
 }
 
+// The engine's own "SetHP": thiscall(full)(value, index), index 0/1/2 being
+// the HP mirror, max HP and current HP.  Setting current HP to 0 is all the
+// game's own sudden-death action does.  Built on first use, so loading core
+// asks nothing of the process beyond reading it.
+var STAT_CURRENT_HP = 2;
+var setCreatureStatFn = null;
+
+function setCreatureStat(full, value, index) {
+    if (setCreatureStatFn === null) {
+        setCreatureStatFn = new NativeFunction(at(RVA.setCreatureStat), "void",
+                                               ["pointer", "int", "int"],
+                                               { abi: "thiscall" });
+    }
+    setCreatureStatFn(full, value, index);
+}
+
 // Combat and gold code hands out the sheet, stat code the full object, so the
 // capture path has to accept either.
 function noteHeroSheet(sheet) {

@@ -9,13 +9,8 @@
 // .call(), and getting that wrong yields an access violation at a nonsense
 // address.
 
-var setCreatureStat = new NativeFunction(at(RVA.setCreatureStat), "void",
-                                         ["pointer", "int", "int"],
-                                         { abi: "thiscall" });
 var addExperience = new NativeFunction(at(RVA.addExperience), "int",
                                        ["pointer", "int"], { abi: "thiscall" });
-
-var STAT_CURRENT_HP = 2;
 
 function requireHero() {
     if (!live(heroFull)) {
