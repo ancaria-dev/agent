@@ -94,3 +94,37 @@ hook("artRaise", RVA.artRaise, function () {
         prev: art.level, next: wanted
     });
 });
+
+// Every art the hero owns, in vector order, one record per `;`:
+// index:id:aspect:level:bonus.
+command("player.arts", function () {
+    var span = heroArtSpan();
+    if (span === null) {
+        throw new Error("No hero found. Load a world first.");
+    }
+    var count = span[1].sub(span[0]).toUInt32() / ART_SIZE;
+    var out = [];
+    for (var i = 0; i < count; i++) {
+        var art = artFields(span[0].add(i * ART_SIZE), i);
+        out.push([art.index, art.id, art.aspect, art.level, art.bonus].join(":"));
+    }
+    return { n: out.length, arts: out.join(";") };
+});
+
+// The base level, written where a rune writes it.  The game sets bit 0 of
+// +0x08 right after its own write, so this does too.
+command("player.art", function (f) {
+    var span = heroArtSpan();
+    var index = parseInt(f.index, 10);
+    if (span === null || isNaN(index) || index < 0 ||
+            span[0].add((index + 1) * ART_SIZE).compare(span[1]) > 0) {
+        throw new Error("No combat art at index " + f.index + ".");
+    }
+    var record = span[0].add(index * ART_SIZE);
+    var level = Math.max(0, Math.min(0xFF, parseInt(f.level, 10) || 0));
+    record.add(ART.level).writeU8(level);
+    record.add(0x08).writeU8(record.add(0x08).readU8() | 1);
+    var art = artFields(record, index);
+    return { index: index, id: art.id, aspect: art.aspect,
+             level: art.level, bonus: art.bonus };
+});
