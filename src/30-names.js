@@ -122,6 +122,41 @@ var CLASSES = {
     5: "WoodElf", 6: "Vampiress", 7: "VampiressForm", 8: "Dwarf", 9: "Daemon"
 };
 
+// Creatures share the object manager with items, effects, lights and scenery,
+// and share nothing else with them: reading max HP off a sword returns noise
+// (1197494489 in one sample).  The type name is what tells them apart, and
+// typeName is cached per id, so asking costs a lookup the first time only.
+var CREATURE_TYPES = /^TYPE_(NPC|NATURE)_/;
+
+// A creature by ref, as flat wire fields, or null when the ref is not one.
+function creatureFields(ref) {
+    var obj = objectByRef(ref);
+    if (obj === null) {
+        return null;
+    }
+    try {
+        var typeId = obj.add(0x10).readU32() >>> 0;
+        // Hero classes 1..9 sit in the same field and name as TYPE_NPC_* too.
+        var name = typeName(typeId);
+        if (name === null || !CREATURE_TYPES.test(name)) {
+            return null;
+        }
+        return {
+            ref: ref,
+            type: typeId,
+            name: name,
+            level: obj.add(0x3FE).readU16(),
+            hp: obj.add(0x4D8).readU32() >>> 0,
+            maxHp: obj.add(0x4D4).readU32() >>> 0,
+            x: obj.add(0x1C).readS32(),
+            y: obj.add(0x20).readS32(),
+            player: isHeroFull(obj) ? 1 : 0
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
 function describe(full) {
     if (!live(full)) {
         return null;
