@@ -16,6 +16,7 @@
 // and per character, so a fixed index-to-name table would be wrong for most.
 
 var SKILLS_AT = 0x2C;
+var SKILL_POINTS_AT = 0x42;
 
 hook("skillWrite", RVA.skillWrite, {
     onEnter: function () {
@@ -52,11 +53,22 @@ hook("skillWrite", RVA.skillWrite, {
 // Remaining skill points, further down the same function.  Report only: this is
 // a budget the UI spends against, and multiplying it once wrapped a live save's
 // counter to 65535.
+//
+// The site is the store itself (`mov [edi+0x42], ax`), so AX holds the new
+// count and the field still holds the old one.
 hook("skillPoints", RVA.skillPoints, {
     onEnter: function () {
         var ctx = this.context;
-        if (isHeroSheet(ctx.edi)) {
-            evt("skillpoints.changed", { next: ctx.eax.toUInt32() & 0xFFFF });
+        if (!isHeroSheet(ctx.edi)) {
+            return;
         }
+        var prev;
+        try {
+            prev = ctx.edi.add(SKILL_POINTS_AT).readU16();
+        } catch (e) {
+            return;
+        }
+        evt("skillpoints.changed",
+            { prev: prev, next: ctx.eax.toUInt32() & 0xFFFF });
     }
 });
