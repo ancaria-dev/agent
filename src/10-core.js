@@ -151,10 +151,11 @@ function same(a, b) {
 }
 
 // Object refs to objects: the manager's table, walked read-only.  Items,
-// creatures and everything else in the world are addressed by ref.  The game's own objectByIndex is
-// callable, but its ref-mismatch branch WRITES [obj+0xC] to repair the entry --
-// a lookup for logging has no business doing that, and the table walk is four
-// reads.  Bounds come from the same function so a bad ref behaves identically.
+// creatures and everything else in the world are addressed by ref.  The game's
+// own objectByIndex is callable, but its ref-mismatch branch WRITES [obj+0xC]
+// to repair the entry -- a lookup for logging has no business doing that, and
+// the table walk is four reads.  Bounds come from the same function so a bad
+// ref behaves identically.
 function objectByRef(ref) {
     if (!ref || ref < 0) {
         return null;
