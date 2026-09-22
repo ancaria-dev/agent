@@ -279,7 +279,31 @@ function hook(name, rva, callbacks) {
         }
         callbacks = traced;
     }
-    Interceptor.attach(at(rva), callbacks);
+    return Interceptor.attach(at(rva), callbacks);
+}
+
+// A hook that is attached only while its owner wants it.  Some sites run once
+// per object while a world loads or unloads, three thousand calls in a burst,
+// and an interceptor there kills Frida however little its callback does.  The
+// owner switches these off before such a burst and back on after it.
+//
+// Same name-first shape as hook(), so the host's manifest lists the site and
+// --no-hook still reaches it.
+function switchable(name, rva, callbacks) {
+    var listener = null;
+    return {
+        on: function () {
+            if (listener === null && DISABLED.indexOf(name) < 0) {
+                listener = hook(name, rva, callbacks);
+            }
+        },
+        off: function () {
+            if (listener !== null) {
+                listener.detach();
+                listener = null;
+            }
+        }
+    };
 }
 
 var loading = 0;
