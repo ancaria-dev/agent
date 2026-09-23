@@ -57,3 +57,15 @@ hook("sectorEnter", RVA.sectorEnter, {
         evt("world.sector_enter", { x: x, y: y });
     }
 });
+
+// What the hooks above last saw.  Nothing is known until the hero has crossed
+// into a region or sector since the agent attached, and 0 / an absent sector
+// says so rather than guessing.
+command("world.state", function () {
+    var out = { region: worldRegion };
+    if (worldSector !== null) {
+        out.sx = worldSector.x;
+        out.sy = worldSector.y;
+    }
+    return out;
+});
