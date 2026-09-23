@@ -5,6 +5,7 @@
   "sig": {
     "artRaise": "88580680480801eb",
     "commitStats": "83ec0c56578bf1e8",
+    "console": "6aff688cdc860064",
     "discover": "ff81ec560000c390",
     "expWrite": "89430c0f8e990000",
     "getLocalHero": "56578bf9e8a73b1d",
@@ -20,6 +21,7 @@
     "itemPickup": "6aff68286c860064",
     "itemStore": "83ec0c558b6c2414",
     "killCount": "8985f056000083fb",
+    "loadGame": "6aff68bee2860064",
     "objCreate": "64a1000000006aff",
     "objDestroy": "64a1000000006aff",
     "posCamera": "83ec288b44242c56",
@@ -27,6 +29,7 @@
     "regionEnter": "81ec180100005355",
     "regionExit": "81ec100200005355",
     "resurrect": "8b81f4560000c781",
+    "saveGame": "6aff6803e1860064",
     "sectorEnter": "6aff68b9fd850064",
     "skillPoints": "66894742eb046689",
     "skillWrite": "668b47428bc881e1",
