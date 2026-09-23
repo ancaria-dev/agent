@@ -14,6 +14,9 @@
 // reload did survive with them attached, but the switch costs nothing and the
 // failure it prevents is a hard crash.
 
+// Refs created while a loot drop runs, or null outside one.  See lootDrop.
+var lootDropping = null;
+
 var spawnHook = switchable("objCreate", RVA.objCreate, {
     // The object is built inside create, so it is read on the way out.
     onEnter: function (args) {
@@ -26,6 +29,9 @@ var spawnHook = switchable("objCreate", RVA.objCreate, {
     onLeave: function () {
         if (!this.ref) {
             return;
+        }
+        if (lootDropping !== null) {
+            lootDropping.push(this.ref);
         }
         var fields = creatureFields(this.ref);
         if (fields !== null) {
@@ -154,4 +160,94 @@ command("world.kill", function (f) {
     var ref = parseInt(f.ref, 10);
     setCreatureStat(creatureAt(ref), 0, STAT_CURRENT_HP);
     return creatureFields(ref);
+});
+
+// Loot.  A creature's drop is created inside cCreature's loot function, so the
+// items are not its arguments: every object cObjectManager::create makes
+// between its entry and its return is what it dropped.  That borrows the
+// create hook above, and so shares its window: nothing is reported while a
+// world loads.  Chests are simpler, their contents already exist as a vector
+// of refs on the chest when it opens.
+//
+// Items travel as ref:type:NAME joined by `;`.
+
+function lootItems(refs) {
+    var out = [];
+    for (var i = 0; i < refs.length; i++) {
+        var obj = objectByRef(refs[i]);
+        if (obj === null) {
+            continue;
+        }
+        try {
+            var type = obj.add(0x10).readU32() >>> 0;
+            var name = typeName(type);
+            // Loot, not the effects and sounds a death also creates.
+            if (name !== null && !CREATURE_TYPES.test(name) &&
+                    name.indexOf("TYPE_FX_") !== 0) {
+                out.push(refs[i] + ":" + type + ":" + name);
+            }
+        } catch (e) {}
+    }
+    return out;
+}
+
+function objectRef(obj) {
+    try {
+        return obj.add(0x0C).readU32() >>> 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
+hook("lootDrop", RVA.lootDrop, {
+    onEnter: function () {
+        this.outer = lootDropping;
+        lootDropping = [];
+        this.source = snapPtr(this.context.ecx);
+    },
+    onLeave: function () {
+        var made = lootDropping || [];
+        lootDropping = this.outer;
+        var items = lootItems(made);
+        if (items.length === 0) {
+            return;
+        }
+        // The type straight off the object; its ref at +0x0C is what items
+        // carry there, and on a creature is still to be seen in play.
+        var source = 0;
+        var type = 0;
+        if (live(this.source)) {
+            source = objectRef(this.source);
+            try {
+                type = this.source.add(0x10).readU32() >>> 0;
+            } catch (e) {}
+        }
+        evt("loot.drop", {
+            source: source,
+            type: type,
+            name: type ? (typeName(type) || "") : "",
+            chest: 0,
+            items: items.join(";")
+        });
+    }
+});
+
+hook("chestDrop", RVA.chestDrop, {
+    onEnter: function () {
+        try {
+            var chest = this.context.ecx;
+            var begin = chest.add(0x1E4).readPointer();
+            var end = chest.add(0x1E8).readPointer();
+            var refs = [];
+            for (var p = begin; !begin.isNull() && p.compare(end) < 0; p = p.add(4)) {
+                refs.push(p.readU32() >>> 0);
+            }
+            var items = lootItems(refs);
+            var type = chest.add(0x10).readU32() >>> 0;
+            evt("loot.drop", {
+                source: objectRef(chest), type: type, name: typeName(type) || "",
+                chest: 1, items: items.join(";")
+            });
+        } catch (e) {}
+    }
 });
