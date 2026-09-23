@@ -81,3 +81,77 @@ onHero(function () {
         spawnWatch(true);
     }
 });
+
+// Every creature the object manager holds, as one frame: a mod asking "what is
+// around" wants the whole answer, and a round-trip per creature would be
+// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player joined by
+// `;`, and each type name is sent once, as type=NAME joined by `,`.  Names are
+// TYPE_ plus capitals, digits and underscores, so neither separator can occur
+// inside one.
+//
+// With x, y and radius, only the creatures within that distance of the point,
+// in world units, which is how a mod asks for "near the hero" without paying
+// for the whole map.
+function packCreatures(f) {
+    var mgr = ptr(VA.objectManager).readPointer();
+    if (mgr.isNull()) {
+        return { n: 0, creatures: "", names: "" };
+    }
+    var count = (mgr.add(8).readPointer().toUInt32() -
+                 mgr.add(4).readPointer().toUInt32()) >> 2;
+    var near = f.radius !== undefined;
+    var cx = parseInt(f.x, 10);
+    var cy = parseInt(f.y, 10);
+    var r2 = Math.pow(parseInt(f.radius, 10) || 0, 2);
+    var out = [];
+    var names = {};
+    for (var ref = 1; ref < count; ref++) {
+        var c = creatureFields(ref);
+        if (c === null) {
+            continue;
+        }
+        if (near && Math.pow(c.x - cx, 2) + Math.pow(c.y - cy, 2) > r2) {
+            continue;
+        }
+        out.push([c.ref, c.type, c.level, c.hp, c.maxHp, c.x, c.y,
+                  c.player].join(":"));
+        names[c.type] = c.name;
+    }
+    var named = [];
+    for (var type in names) {
+        named.push(type + "=" + names[type]);
+    }
+    return { n: out.length, creatures: out.join(";"), names: named.join(",") };
+}
+
+command("world.creatures", packCreatures);
+
+command("world.creature", function (f) {
+    var c = creatureFields(parseInt(f.ref, 10));
+    if (c === null) {
+        throw new Error("No creature at ref " + f.ref + ".");
+    }
+    return c;
+});
+
+// The same call the game's sudden-death action makes.  Nothing but creatures:
+// an item has no HP table, and the index would land in the middle of it.
+function creatureAt(ref) {
+    var c = creatureFields(ref);
+    if (c === null) {
+        throw new Error("No creature at ref " + ref + ".");
+    }
+    return objectByRef(ref);
+}
+
+command("world.hp", function (f) {
+    var ref = parseInt(f.ref, 10);
+    setCreatureStat(creatureAt(ref), parseInt(f.value, 10), STAT_CURRENT_HP);
+    return creatureFields(ref);
+});
+
+command("world.kill", function (f) {
+    var ref = parseInt(f.ref, 10);
+    setCreatureStat(creatureAt(ref), 0, STAT_CURRENT_HP);
+    return creatureFields(ref);
+});
