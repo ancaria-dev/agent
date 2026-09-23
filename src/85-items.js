@@ -265,3 +265,20 @@ hook("itemMove", RVA.itemMove, {
         } catch (e) {}
     }
 });
+
+// A potion drunk.  The site is the call right after cPotion3D::receive_event's
+// filters have passed, so it runs once per drink and never for the other events
+// a potion receives.  EDI is the potion and ESI the creature drinking it.
+// onEnter only: this is a mid-function site.
+hook("potionDrink", RVA.potionDrink, function () {
+    try {
+        var potion = this.context.edi;
+        var type = potion.add(ITEM.type).readU32() >>> 0;
+        evt("item.drink", {
+            ref: potion.add(ITEM.ref).readU32() >>> 0,
+            type: type,
+            name: typeName(type),
+            player: isHeroFull(this.context.esi) ? 1 : 0
+        });
+    } catch (e) {}
+});
