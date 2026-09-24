@@ -2,23 +2,30 @@
 //
 // Every window opens and closes the same way.  A UI event (cEventUI2) names
 // it in [ev+0x48], id 0x11 shows, 0x12 hides, 0x13 toggles, and the window
-// whose name at [window+0x30] matches calls its onShow(bool).  Three hooks
-// turn that into one event, "ui.screen", with the window's name:
+// whose name at [window+0x30] matches calls its onShow(bool).  Each move is
+// reported in two halves:
+//
+//   "ui.show" / "ui.hide"      asked before the game acts; a veto keeps the
+//                              window as it was.  Only where SCREEN_ASKS says
+//                              the game can still refuse, so the API has a
+//                              deciding class for exactly those moves.
+//   "ui.shown" / "ui.hidden"   the fact, from onShow, for every move however
+//                              it came about.  This is the one that lines up
+//                              with the rest of the game's events.
+//
+// Three hooks do it:
 //
 //   uiEvent     cUI_Manager::receive_event, the funnel.  The kernel delivers
 //               here and the manager's own hotkeys (journal, world map) call it
-//               directly, so this is where a world window's open or close is
-//               asked about.  A veto rewrites the id to one nothing handles for
-//               the call.  Never a menu's: Options' Cancel and the hero
-//               select's Back send their pair straight from their own code,
-//               one event at a time, and a refused half is a black screen.
+//               directly, so this is where a world window's move is asked
+//               about.  A veto rewrites the id to one nothing handles for the
+//               call.  Never a menu's: Options' Cancel and the hero select's
+//               Back send their pair straight from their own code, one event at
+//               a time, and a refused half is a black screen.
 //   uiCommand   a menu button.  One click is a pair, show the next window and
 //               hide this one, and vetoing half of it leaves a black screen, so
 //               the whole click is asked about here and refused as a whole.
-//   windowShow  the base onShow, which says what really happened.  A window
-//               nobody asked about (the chest opens through an event of its
-//               own, the main menu reappears after the world) is reported here,
-//               after the fact, and cannot be refused.
+//   windowShow  the base onShow, which says what really happened.
 //
 // Only real windows are reported.  Tooltips run onShow constantly, the minimap
 // is shown again thirty times a second, the inventory's two side panels arrive
@@ -28,9 +35,9 @@
 // yes/no dialog, DEFAULT_BUSYDLG, and is reported with that mode.
 //
 // Quit, and leaving the world for the menu, are asked as "ui.quit", travel
-// through a portal as "ui.portal", and starting the game from the hero select
-// as "hero.chosen".  Entering and leaving the world are reported as
-// "game.start" and "game.stop".
+// through a portal as "ui.portal" and reported as "ui.portal_used", and
+// starting the game from the hero select is asked as "hero.chosen".  Entering
+// and leaving the world are reported as "game.start" and "game.stop".
 
 var SCREEN_SHOW = 0x11;
 var SCREEN_HIDE = 0x12;
@@ -44,6 +51,26 @@ var SCREEN_DIALOG = "DEFAULT_BUSYDLG";
 var SCREEN_DIALOG_MODE = 0x154;
 var SCREEN_PORTALS = 5;            // the dialog's mode while it lists portals
 
+// Which moves the game can still refuse, as [show, hide], each one seen asked
+// and refused in the game.  A window missing here is asked both ways.  The API
+// has a deciding class for exactly these, so keep the two in step.
+var SCREEN_ASKS = {
+    "UI_MAINMENU": [false, true],
+    "UI_WND_OPTIONS": [true, false],
+    "UI_CHARACTER": [true, false],
+    "UI_WND_SAVEGAME": [true, false],
+    "UI_WND_ESCMENU": [true, true],
+    "UI_WND_INVENTORY": [true, true],
+    "UI_WND_MERCHANT": [true, true],
+    "UI_WND_BLACKSMITH": [true, true],
+    "UI_WND_MASTER": [true, true],
+    "UI_WND_CHEST": [false, true],
+    "UI_WND_CUBE": [false, false],
+    "UI_WND_MEGAMAP": [true, false],
+    "UI_WND_QUESTBOOK": [true, true],
+    "UI_WND_CONSOLE": [true, true]
+};
+
 // Only a button can refuse these, because only a button's pair is seen whole.
 var SCREEN_MENUS = [SCREEN_MAIN_MENU, SCREEN_HERO_SELECT, "UI_WND_OPTIONS", "UI_WND_SAVEGAME"];
 
@@ -56,8 +83,6 @@ var SCREEN_IGNORED = [
 // What onShow last said about each window.  Unknown means hidden: a close for
 // a window never seen open is the world load tidying up, not a screen closing.
 var screenVisible = {};
-// Changes a mod has already been asked about, waiting for their onShow.
-var screenAnnounced = {};
 var screenCommands = 0;
 // Inside armaPlay or armaStop the world is already coming or going, and a
 // refused window would be left over it.  Those moves are reported, not asked.
@@ -72,6 +97,14 @@ function screenReported(name) {
             name.indexOf("UI_WND_") === 0) && SCREEN_IGNORED.indexOf(name) < 0;
 }
 
+function screenAskable(change) {
+    if (change.multiplayer) {
+        return true;
+    }
+    var asks = SCREEN_ASKS[change.name];
+    return asks === undefined || asks[change.open ? 0 : 1];
+}
+
 function screenIsUiEvent(ev) {
     if (screenUi2 === null) {
         screenUi2 = ptr(VA.eventUi2);
@@ -83,8 +116,8 @@ function screenIsUiEvent(ev) {
     }
 }
 
-function screenFields(name, open, cancelable) {
-    var fields = { window: name, open: open ? 1 : 0, cancelable: cancelable ? 1 : 0 };
+function screenFields(name, open) {
+    var fields = { window: name };
     if (name === SCREEN_HERO_SELECT && open) {
         try {
             fields.campaign = ptr(VA.campaign).readU16();
@@ -139,17 +172,16 @@ hook("uiEvent", RVA.uiEvent, {
             return;
         }
         if (change === null || change.name === undefined || change.multiplayer ||
-                SCREEN_MENUS.indexOf(change.name) >= 0) {
+                SCREEN_MENUS.indexOf(change.name) >= 0 || !screenAskable(change)) {
             return;
         }
-        var verdict = ask("ui.screen", screenFields(change.name, change.open, true));
+        var verdict = ask(change.open ? "ui.show" : "ui.hide",
+                          screenFields(change.name, change.open));
         if (verdict.cancel) {
             this.vetoed = ev;
             this.id = ev.add(4).readU32();
             ev.add(4).writeU32(SCREEN_NOTHING);
-            return;
         }
-        screenAnnounced[change.name] = change.open;
     },
     onLeave: function () {
         if (this.vetoed) {
@@ -199,7 +231,10 @@ hook("uiCommand", RVA.uiCommand, {
         });
         for (var i = 0; i < changes.length; i++) {
             var c = changes[i];
-            var fields = screenFields(c.name, c.open, true);
+            if (!screenAskable(c)) {
+                continue;
+            }
+            var fields = screenFields(c.name, c.open);
             if (c.multiplayer) {
                 fields.page = SCREEN_MULTIPLAYER_PAGE;
             }
@@ -209,7 +244,7 @@ hook("uiCommand", RVA.uiCommand, {
             if (!c.open && opened !== null) {
                 fields.to = opened;
             }
-            if (ask("ui.screen", fields).cancel) {
+            if (ask(c.open ? "ui.show" : "ui.hide", fields).cancel) {
                 if (screenEmptyCommand === null) {
                     screenEmptyCommand = Memory.alloc(16);
                 }
@@ -217,10 +252,10 @@ hook("uiCommand", RVA.uiCommand, {
                 return;
             }
         }
-        changes.forEach(function (c) {
-            if (!c.multiplayer) {
-                screenAnnounced[c.name] = c.open;
-            }
+        // A page has no onShow of its own, so its end is reported once the
+        // click has gone through.
+        this.pages = changes.filter(function (c) {
+            return c.multiplayer;
         });
         if (page !== null) {
             screenPage = page;
@@ -228,6 +263,10 @@ hook("uiCommand", RVA.uiCommand, {
     },
     onLeave: function () {
         screenCommands -= 1;
+        (this.pages || []).forEach(function (c) {
+            evt(c.open ? "ui.shown" : "ui.hidden",
+                { window: SCREEN_MAIN_MENU, page: SCREEN_MULTIPLAYER_PAGE });
+        });
     }
 });
 
@@ -255,12 +294,7 @@ hook("windowShow", RVA.windowShow, {
             // A fresh main menu starts on its first page.
             screenPage = 0;
         }
-        if (screenAnnounced[name] === open) {
-            delete screenAnnounced[name];
-            return;
-        }
-        delete screenAnnounced[name];
-        evt("ui.screen", screenFields(name, open, false));
+        evt(open ? "ui.shown" : "ui.hidden", screenFields(name, open));
     }
 });
 
@@ -273,9 +307,7 @@ function screenDialogShown(dialog, open) {
         return;
     }
     if (mode === SCREEN_PORTALS) {
-        var fields = screenFields(SCREEN_DIALOG, open, false);
-        fields.mode = mode;
-        evt("ui.screen", fields);
+        evt(open ? "ui.shown" : "ui.hidden", { window: SCREEN_DIALOG, mode: mode });
     }
 }
 
@@ -292,7 +324,8 @@ replaced("exitGame", RVA.exitGame, "void", ["pointer"], function (original) {
 // What a dialog does when answered.  5 quits to the desktop (Esc on the main
 // menu), 3 leaves the world for the main menu (the esc menu's exit), 4 travels
 // through the portal whose id is the second argument, and 6 is an empty case,
-// which is what a veto turns any of them into.
+// which is what a veto turns any of them into.  The portal's teleport runs
+// inside this call, so its end is reported on the way out.
 var BUSY_LEAVE_WORLD = 3;
 var BUSY_PORTAL = 4;
 var BUSY_QUIT = 5;
@@ -313,12 +346,21 @@ hook("busyReact", RVA.busyReact, {
             } catch (e) {
                 return;
             }
-            verdict = ask("ui.portal", { id: args[1].toInt32() });
+            var portal = args[1].toInt32();
+            verdict = ask("ui.portal", { id: portal });
+            if (!verdict.cancel) {
+                this.portal = portal;
+            }
         } else {
             return;
         }
         if (verdict.cancel) {
             args[0] = ptr(BUSY_NOTHING);
+        }
+    },
+    onLeave: function () {
+        if (this.portal !== undefined) {
+            evt("ui.portal_used", { id: this.portal });
         }
     }
 });
@@ -347,7 +389,8 @@ hook("gameStop", RVA.gameStop, {
 // exists (an import); a number past the switch, 0xC, returns at once, which is
 // the veto.  The class is read off the chosen slot's panel, and the difficulty
 // through the game's own list getter, because the game only stores it after
-// this has decided to go ahead.
+// this has decided to go ahead.  The campaign is still the one whose button
+// opened the hero select.
 var HERO_NEW = 1;
 var HERO_IMPORT = 7;
 var HERO_NOTHING = 0xC;
@@ -371,6 +414,7 @@ function heroChoice(select, action) {
         }
         fields.difficulty = heroListValue(list);
     }
+    fields.campaign = ptr(VA.campaign).readU16();
     return fields;
 }
 
