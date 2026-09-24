@@ -322,6 +322,31 @@ function switchable(name, rva, callbacks) {
     };
 }
 
+// A site that reads neither `this` nor an argument cannot be stopped from
+// onEnter: there is nothing to rewrite.  Replacing the function is the only
+// veto, and `make` gets the original to call when the answer is yes.
+//
+// The original is called with exceptions: "propagate".  Frida's default,
+// "steal", turns any exception inside it into "system error" and aborts the
+// call, and cCommand_exitGame::execute raises one it handles itself: with
+// "steal", Quit simply stopped working.  Same name-first shape as hook(), so
+// the manifest lists the site and --no-hook reaches it.
+var replacements = [];
+
+function replaced(name, rva, ret, argTypes, make) {
+    if (DISABLED.indexOf(name) >= 0) {
+        console.log("hook " + name + " disabled");
+        return;
+    }
+    var original = new NativeFunction(at(rva), ret, argTypes,
+                                      { abi: "thiscall", exceptions: "propagate" });
+    var callback = new NativeCallback(make(original), ret, argTypes, "thiscall");
+    // A NativeCallback nobody references is collected, and the game then
+    // jumps into freed memory.
+    replacements.push(callback);
+    Interceptor.replace(at(rva), callback);
+}
+
 var loading = 0;
 
 function whileLoading(name, rva) {
