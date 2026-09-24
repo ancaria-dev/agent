@@ -4,14 +4,19 @@
   "version": "2.0.2.118",
   "sig": {
     "artRaise": "88580680480801eb",
+    "busyReact": "64a1000000006aff",
     "buyItem": "6aff686d57870064",
     "chestDrop": "6aff6802a3860064",
     "commitStats": "83ec0c56578bf1e8",
     "console": "6aff688cdc860064",
     "discover": "ff81ec560000c390",
+    "exitGame": "68f4b49e00e8c68f",
     "expWrite": "89430c0f8e990000",
+    "gameStart": "568bf1668b460466",
+    "gameStop": "6aff685115880064",
     "getLocalHero": "56578bf9e8a73b1d",
     "goldDelta": "64a1000000006aff",
+    "heroAction": "64a1000000006aff",
     "heroLoad": "64a1000000006aff",
     "heroTerminate": "6aff683cd1860064",
     "hpClamp": "8985300100008b44",
@@ -40,6 +45,9 @@
     "skillPoints": "66894742eb046689",
     "skillWrite": "668b47428bc881e1",
     "statGrant": "64a1000000006aff",
+    "uiCommand": "56578bf933f68b47",
+    "uiEvent": "64a1000000006aff",
+    "windowShow": "64a1000000006aff",
     "worldLoad": "6aff686ecf860064"
   }
 }
