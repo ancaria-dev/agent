@@ -61,11 +61,18 @@ hook("sectorEnter", RVA.sectorEnter, {
 // What the hooks above last saw.  Nothing is known until the hero has crossed
 // into a region or sector since the agent attached, and 0 / an absent sector
 // says so rather than guessing.
+//
+// The campaign is the game's own word: cEngine::load sets it from the save
+// and the main menu from its button.  Outside a world it only remembers the
+// last button, so it is sent while there is a hero.
 command("world.state", function () {
     var out = { region: worldRegion };
     if (worldSector !== null) {
         out.sx = worldSector.x;
         out.sy = worldSector.y;
+    }
+    if (live(heroFull)) {
+        out.campaign = ptr(VA.campaign).readU16();
     }
     return out;
 });
