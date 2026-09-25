@@ -378,6 +378,46 @@ function onTick(fn) {
     tickListeners.push(fn);
 }
 
+// The tick runs hundreds of times a second.  State that changes over seconds
+// (weather, the clock, the area) is sampled at most every `ms` instead.
+function onTickEvery(ms, fn) {
+    var last = 0;
+    onTick(function () {
+        var now = Date.now();
+        if (now - last < ms) {
+            return;
+        }
+        last = now;
+        fn();
+    });
+}
+
+// Work that calls into the game or writes what the engine is using runs here,
+// never on Frida's thread where commands run: a command queues it and returns.
+// Nothing runs while a world loads, and a full queue refuses rather than grows.
+var ENGINE_QUEUE_MAX = 32;
+var engineQueue = [];
+
+function later(fn) {
+    if (engineQueue.length >= ENGINE_QUEUE_MAX) {
+        return false;
+    }
+    engineQueue.push(fn);
+    return true;
+}
+
+onTick(function () {
+    if (engineQueue.length === 0 || isLoading()) {
+        return;
+    }
+    var fn = engineQueue.shift();
+    try {
+        fn();
+    } catch (e) {
+        console.log("queued game call failed: " + e.message);
+    }
+});
+
 hook("heroCapture", RVA.getLocalHero, {
     onLeave: function (retval) {
         if (!retval.isNull() && !isHeroFull(retval)) {
