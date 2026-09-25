@@ -150,7 +150,10 @@ function creatureFields(ref) {
             maxHp: obj.add(0x4D4).readU32() >>> 0,
             x: obj.add(0x1C).readS32(),
             y: obj.add(0x20).readS32(),
-            player: isHeroFull(obj) ? 1 : 0
+            player: isHeroFull(obj) ? 1 : 0,
+            // The CL_ class of the game's data (1 hero, 2 monster, 3 NPC,
+            // 6 animal, 14 human...): read live on every creature of a town.
+            cclass: obj.add(0x1F0).readU32() >>> 0
         };
     } catch (e) {
         return null;

@@ -90,7 +90,7 @@ onHero(function () {
 
 // Every creature the object manager holds, as one frame: a mod asking "what is
 // around" wants the whole answer, and a round-trip per creature would be
-// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player joined by
+// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player:cclass joined by
 // `;`, and each type name is sent once, as type=NAME joined by `,`.  Names are
 // TYPE_ plus capitals, digits and underscores, so neither separator can occur
 // inside one.
@@ -120,7 +120,7 @@ function packCreatures(f) {
             continue;
         }
         out.push([c.ref, c.type, c.level, c.hp, c.maxHp, c.x, c.y,
-                  c.player].join(":"));
+                  c.player, c.cclass].join(":"));
         names[c.type] = c.name;
     }
     var named = [];
