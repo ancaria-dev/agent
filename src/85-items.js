@@ -226,14 +226,148 @@ hook("itemPickup", RVA.itemPickup, {
     }
 });
 
+// thiscall(creature)(int type, int count, int ref, int inventory) -> ref.  The
+// first argument is the TYPE: the game sizes it from the type table and hands
+// it to cObjectManager::create, which builds a fresh item when ref is 0.  So
+// the item is known only on the way out, as the ref the function returns, 0
+// when the bag had no room.
 hook("itemStore", RVA.itemStore, {
-    onEnter: function (args) {
+    onEnter: function () {
+        this.creature = snapPtr(this.context.ecx);
+    },
+    onLeave: function (retval) {
         try {
-            var fields = itemFields(args[0].toUInt32() >>> 0);
-            fields.player = isHeroFull(this.context.ecx) ? 1 : 0;
+            var ref = retval.toUInt32() >>> 0;
+            if (ref === 0) {
+                return;
+            }
+            var fields = itemFields(ref);
+            fields.player = isHeroFull(this.creature) ? 1 : 0;
             evt("item.stored", fields);
         } catch (e) {}
     }
+});
+
+// The hero's bag and what the hero wears.
+//
+// The inventory manager holds 32 bags of 0x1180 bytes; a creature's own is the
+// one whose index equals its ref (the hero, ref 1, owns bag 1).  A bag is a
+// grid of 12-byte cells, row * width + column: the item's top-left cell holds
+// its ref, width, height and type.  Worn items are 19 refs on the creature.
+var BAG_SIZE = 0x1180;
+var BAG_COUNT = 32;
+var BAG_CELLS = 0x18;
+var BAG_CELL = 12;
+var BAG_WIDTH = 0x115C;
+var BAG_HEIGHT = 0x115E;
+var BAG_INDEX = 0x1160;
+var WORN = 0x1A4;
+var WORN_SLOTS = 19;
+
+function heroBag() {
+    var mgr = ptr(VA.inventories).readPointer();
+    if (mgr.isNull()) {
+        return null;
+    }
+    var index = heroFull.add(ITEM.ref).readU32() >>> 0;
+    if (index >= BAG_COUNT) {
+        return null;
+    }
+    var bag = mgr.add(index * BAG_SIZE);
+    return bag.add(BAG_INDEX).readU16() === index ? bag : null;
+}
+
+// Bag items as cell:ref:type:w:h and worn items as slot:ref:type, each list
+// joined by ';', with every type's name once, type=NAME joined by ','.
+command("player.inventory", function () {
+    if (!live(heroFull)) {
+        throw new Error("No hero found. Load a world first.");
+    }
+    var names = {};
+    var bagged = [];
+    var width = 0;
+    var height = 0;
+    var bag = heroBag();
+    if (bag !== null) {
+        width = bag.add(BAG_WIDTH).readU16();
+        height = bag.add(BAG_HEIGHT).readU16();
+        var cells = Math.min(width * height, (BAG_INDEX - BAG_CELLS) / BAG_CELL | 0);
+        for (var cell = 0; cell < cells; cell++) {
+            var rec = bag.add(BAG_CELLS + cell * BAG_CELL);
+            var ref = rec.readU32() >>> 0;
+            if (ref === 0) {
+                continue;
+            }
+            var obj = objectByRef(ref);
+            var type = obj === null ? rec.add(8).readU16() : obj.add(ITEM.type).readU32() >>> 0;
+            bagged.push([cell, ref, type, rec.add(5).readU8(), rec.add(6).readU8()].join(":"));
+            names[type] = true;
+        }
+    }
+    var worn = [];
+    for (var slot = 0; slot < WORN_SLOTS; slot++) {
+        var wref = heroFull.add(WORN + slot * 4).readU32() >>> 0;
+        var wobj = wref ? objectByRef(wref) : null;
+        if (wobj === null) {
+            continue;
+        }
+        var wtype = wobj.add(ITEM.type).readU32() >>> 0;
+        worn.push([slot, wref, wtype].join(":"));
+        names[wtype] = true;
+    }
+    var named = [];
+    for (var t in names) {
+        var n = typeName(parseInt(t, 10));
+        if (n !== null) {
+            named.push(t + "=" + n);
+        }
+    }
+    return { width: width, height: height, items: bagged.join(";"),
+             worn: worn.join(";"), names: named.join(",") };
+});
+
+// A new item in the hero's bag, made the way the game makes a new hero's kit:
+// inventory_putItem(type, 1, 0, 0) on the hero, on the engine thread.  The
+// game picks the free cell; with none free it logs and makes nothing.  The
+// item arrives as an item.stored event, which carries its ref.  Seen live:
+// (5171, 1, 0, 0) returned ref 3437 and the potion lay in cell 120.
+var giveItemFn = null;
+
+command("player.give", function (f) {
+    if (!live(heroFull)) {
+        throw new Error("No hero found. Load a world first.");
+    }
+    var type = f.type === undefined ? NaN : parseInt(f.type, 10);
+    if (isNaN(type) && f.name !== undefined) {
+        var found = typeIds()[f.name];
+        type = found === undefined ? NaN : found;
+    }
+    if (isNaN(type) || type <= 0 || typeName(type) === null) {
+        throw new Error("No item type " + (f.name || f.type) + ".");
+    }
+    var hero = heroFull;
+    var queued = later(function () {
+        if (!same(hero, heroFull)) {
+            return;
+        }
+        if (giveItemFn === null) {
+            giveItemFn = new NativeFunction(at(RVA.itemStore), "int",
+                                            ["pointer", "int", "int", "int", "int"],
+                                            { abi: "thiscall", exceptions: "propagate" });
+        }
+        // Called from inside the tick's own callback, so Frida runs no
+        // interceptor for it and the store hook stays silent: say it here.
+        var ref = giveItemFn(hero, type, 1, 0, 0) >>> 0;
+        if (ref !== 0) {
+            var fields = itemFields(ref);
+            fields.player = 1;
+            evt("item.stored", fields);
+        }
+    });
+    if (!queued) {
+        throw new Error("Too many game calls waiting.");
+    }
+    return { type: type, name: typeName(type) };
 });
 
 // thiscall(creature)(int slot, int ref, int nn).  One function does equip and
