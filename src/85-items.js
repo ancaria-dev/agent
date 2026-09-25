@@ -151,7 +151,8 @@ function modifierLine(block, index) {
         colour = m[1].toLowerCase();
         text = text.substring(m[0].length);
     }
-    text = text.replace(/\s+$/, "");
+    // A bonus for one class carries a second code after the class name.
+    text = text.replace(/\\c[0-9a-fA-F]{8}/g, "").replace(/\s+$/, "");
     return text === "" ? null : [colour, text];
 }
 
