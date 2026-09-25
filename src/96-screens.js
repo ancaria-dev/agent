@@ -49,7 +49,8 @@ var SCREEN_MAIN_MENU = "UI_MAINMENU";
 var SCREEN_HERO_SELECT = "UI_CHARACTER";
 var SCREEN_DIALOG = "DEFAULT_BUSYDLG";
 var SCREEN_DIALOG_MODE = 0x154;
-var SCREEN_PORTALS = 5;            // the dialog's mode while it lists portals
+var SCREEN_PORTALS = 5;            // the dialog's mode while it lists Ancaria's portals
+var SCREEN_PORTALS_UW = 6;         // and while it lists the Underworld's
 
 // Which moves the game can still refuse, as [show, hide], each one seen asked
 // and refused in the game.  A window missing here is asked both ways.  The API
@@ -306,7 +307,7 @@ function screenDialogShown(dialog, open) {
     } catch (e) {
         return;
     }
-    if (mode === SCREEN_PORTALS) {
+    if (mode === SCREEN_PORTALS || mode === SCREEN_PORTALS_UW) {
         evt(open ? "ui.shown" : "ui.hidden", { window: SCREEN_DIALOG, mode: mode });
     }
 }
@@ -338,16 +339,18 @@ hook("busyReact", RVA.busyReact, {
         if (reaction === BUSY_QUIT || reaction === BUSY_LEAVE_WORLD) {
             verdict = ask("ui.quit", { to: reaction === BUSY_QUIT ? "desktop" : "menu" });
         } else if (reaction === BUSY_PORTAL) {
-            // Only from the portal list; the id means nothing to another mode.
+            // Only from a portal list; the id means nothing to another mode.
+            var listMode;
             try {
-                if (this.context.ecx.add(SCREEN_DIALOG_MODE).readU32() !== SCREEN_PORTALS) {
-                    return;
-                }
+                listMode = this.context.ecx.add(SCREEN_DIALOG_MODE).readU32();
             } catch (e) {
                 return;
             }
+            if (listMode !== SCREEN_PORTALS && listMode !== SCREEN_PORTALS_UW) {
+                return;
+            }
             var portal = args[1].toInt32();
-            verdict = ask("ui.portal", { id: portal });
+            verdict = ask("ui.portal", { id: portal, mode: listMode });
             if (!verdict.cancel) {
                 this.portal = portal;
             }
@@ -363,6 +366,94 @@ hook("busyReact", RVA.busyReact, {
             evt("ui.portal_used", { id: this.portal });
         }
     }
+});
+
+// Which portals the hero has opened: a mask on the hero, the one the game
+// saves as "portals[%x]".  Bit i is entry i of Ancaria's list, bit 14 + i
+// entry i of the Underworld's.  Bits 13 and 27 are the Isle of Refuge, which
+// the list offers only in a network game: it sets both there (with bit 31)
+// and clears them in single player, whatever the mask says.
+var PORTAL_MASK = 0x578;
+var PORTAL_BITS = 28;
+var portalUnlockFn = null;
+
+function portalMask() {
+    return heroFull.add(PORTAL_MASK).readU32() >>> 0;
+}
+
+command("world.portals", function () {
+    if (!live(heroFull)) {
+        throw new Error("No world loaded.");
+    }
+    return { mask: portalMask() };
+});
+
+// Opening goes through the game's own unlock, the one the Teleporter script
+// command calls, which ORs a whole mask in one call; the game has none for
+// closing, so that clears the bits.  Either one id or a mask of them.
+command("world.portal_set", function (f) {
+    var mask;
+    if (f.mask !== undefined) {
+        mask = parseInt(f.mask, 10) >>> 0;
+    } else {
+        var id = parseInt(f.id, 10);
+        if (isNaN(id) || id < 0 || id >= PORTAL_BITS) {
+            throw new Error("No portal " + f.id + ". Use 0..27.");
+        }
+        mask = (1 << id) >>> 0;
+    }
+    mask = (mask & ((1 << PORTAL_BITS) - 1)) >>> 0;
+    if (!live(heroFull) || isLoading()) {
+        throw new Error("No world loaded.");
+    }
+    var open = f.open === "1" || f.open === "true";
+    if (!later(function () {
+        if (open) {
+            if (portalUnlockFn === null) {
+                portalUnlockFn = new NativeFunction(at(RVA.portalUnlock), "void",
+                                                    ["pointer", "uint32", "int"],
+                                                    { abi: "thiscall" });
+            }
+            portalUnlockFn(heroFull, mask, 0);
+        } else {
+            heroFull.add(PORTAL_MASK).writeU32((portalMask() & ~mask) >>> 0);
+        }
+    })) {
+        throw new Error("Too many game calls waiting.");
+    }
+    return { mask: mask, open: open ? 1 : 0 };
+});
+
+// A portal opened or closed, whoever did it: walking up to it, a quest, a
+// mod.  Sampled once a second; the mask a save brings is not a change.
+var portalLast = null;
+
+onTickEvery(1000, function () {
+    if (isLoading() || !live(heroFull)) {
+        portalLast = null;
+        return;
+    }
+    var now;
+    try {
+        now = portalMask();
+    } catch (e) {
+        return;
+    }
+    var before = portalLast;
+    portalLast = now;
+    if (before === null || before === now) {
+        return;
+    }
+    for (var id = 0; id < PORTAL_BITS; id++) {
+        var bit = (1 << id) >>> 0;
+        if ((now & bit) !== (before & bit)) {
+            evt((now & bit) ? "ui.portal_opened" : "ui.portal_closed", { id: id });
+        }
+    }
+});
+
+onHero(function () {
+    portalLast = null;
 });
 
 hook("gameStart", RVA.gameStart, {
