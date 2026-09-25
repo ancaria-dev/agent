@@ -176,7 +176,10 @@ function creatureFields(ref) {
             // 0 when none.  The hero keeps its own horse's ref even on foot.
             mount: obj.add(0x1EC).readU32() >>> 0,
             bond: obj.add(0x570).readU32() >>> 0,
-            horse: creatureIsHorse(typeId) ? 1 : 0
+            horse: creatureIsHorse(typeId) ? 1 : 0,
+            // The creature it follows: the hero's ref on a summoned wolf, -1
+            // once the summon is spent, 0 on everything else seen live.
+            lead: obj.add(0x251).readS32()
         };
     } catch (e) {
         return null;
