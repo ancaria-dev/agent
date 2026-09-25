@@ -177,4 +177,45 @@ command("type.name", function (f) {
     return { id: id, name: typeName(id) };
 });
 
+// "Enables the Attacking of Animals" is one bit on the hero, +0x200 bit
+// 0x10000000, set by the recalculation for each such bonus worn and derived
+// afresh every time it runs: a changed item, a new level.  So a mod's choice
+// is held, not written once: the tick puts the bit back the way the mod
+// wants it until the mod hands it back to the game.  Seen live: with the
+// bit from a bonus shield, the hero attacked and killed rabbits.
+var ANIMALS_FLAGS = 0x200;
+var ANIMALS_BIT = 0x10000000;
+var animalsHeld = null;     // null: the game decides; true or false: held
+
+function animalsBitSet() {
+    return (heroFull.add(ANIMALS_FLAGS).readU32() & ANIMALS_BIT) !== 0;
+}
+
+command("player.animals", function (f) {
+    if (!live(heroFull)) {
+        throw new Error("No world loaded.");
+    }
+    if (f.hold === "1" || f.hold === "0") {
+        animalsHeld = f.hold === "1";
+    } else if (f.hold === "game") {
+        animalsHeld = null;
+    }
+    return { on: animalsBitSet() ? 1 : 0, held: animalsHeld === null ? "game" : (animalsHeld ? "1" : "0") };
+});
+
+onTickEvery(250, function () {
+    if (animalsHeld === null || isLoading() || !live(heroFull)) {
+        return;
+    }
+    var flags = heroFull.add(ANIMALS_FLAGS).readU32() >>> 0;
+    var want = animalsHeld ? (flags | ANIMALS_BIT) >>> 0 : (flags & ~ANIMALS_BIT) >>> 0;
+    if (want !== flags) {
+        heroFull.add(ANIMALS_FLAGS).writeU32(want);
+    }
+});
+
+onHero(function () {
+    animalsHeld = null;
+});
+
 evt("agent.ready", { base: base.toString() });
