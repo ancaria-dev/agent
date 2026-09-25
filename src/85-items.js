@@ -58,8 +58,9 @@ function readMods(obj) {
 }
 
 // Replaces the whole list, clearing the slots past it: "the modifiers are
-// exactly these".  UNVERIFIED against the game: reading these is confirmed,
-// writing them is not, so treat a changed tooltip as the first evidence.
+// exactly these".  Seen in the game: a sword rewritten to 811:30,809:25,802:20
+// lost its five old lines and showed Attack Speed +30, +25% to Attack and
+// Weapon Damage Fire +20.
 function writeMods(obj, packed) {
     var pairs = packed === "" ? [] : packed.split(",");
     for (var i = 0; i < MOD_SLOTS; i++) {
