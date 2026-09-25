@@ -257,7 +257,9 @@ function reshape(ref, changes) {
             if (field[1] === 4) {
                 obj.add(field[0]).writeU32(value >>> 0);
             } else if (field[1] === 2) {
-                obj.add(field[0]).writeU16(value & 0xFFFF);
+                // Signed words: 50000 read back as -15536 and the tooltip went
+                // negative, so nothing above 32767 is written.
+                obj.add(field[0]).writeU16(value < 0 ? 0 : (value > 32767 ? 32767 : value));
             } else {
                 obj.add(field[0]).writeU8(value & 0xFF);
             }
