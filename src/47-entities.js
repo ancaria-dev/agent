@@ -447,6 +447,47 @@ onHero(function () {
     companions = null;
 });
 
+// A horse's figures, the ones its window shows that come straight from the
+// game's HorseData table: a map from the horse's class (+0x400, 0 meaning 1)
+// to seven numbers.  Seen live on a Light War Horse, class 7: speed 145,
+// charge attack regeneration 70 s, riding needed 0, as its window shows.
+// The window scales the other four by level and the rider's riding skill.
+function horseRow(key) {
+    var head = ptr(VA.horseData).readPointer();
+    var node = head.add(4).readPointer();
+    for (var depth = 0; depth < 64 && !node.isNull() && !node.equals(head); depth++) {
+        var at = node.add(0x10).readS32();
+        if (at === key) {
+            var row = [];
+            for (var i = 0; i < 7; i++) {
+                row.push(node.add(0x14 + i * 4).readS32());
+            }
+            return row;
+        }
+        node = node.add(key < at ? 8 : 0x0C).readPointer();
+    }
+    return null;
+}
+
+command("world.horse", function (f) {
+    var ref = parseInt(f.ref, 10);
+    var c = creatureFields(ref);
+    if (c === null || c.horse !== 1) {
+        throw new Error("No horse at ref " + f.ref + ".");
+    }
+    var key = objectByRef(ref).add(0x400).readU8() || 1;
+    var row = horseRow(key);
+    if (row === null) {
+        throw new Error("No horse data for class " + key + ".");
+    }
+    c.hclass = key;
+    c.speed = row[0];
+    c.chargeRegen = row[5];
+    c.riding = row[6];
+    c.display = objectDisplayName(objectByRef(ref)) || "";
+    return c;
+});
+
 // The same call the game's sudden-death action makes.  Nothing but creatures:
 // an item has no HP table, and the index would land in the middle of it.
 function creatureAt(ref) {
