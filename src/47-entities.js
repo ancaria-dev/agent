@@ -133,11 +133,44 @@ function packCreatures(f) {
 command("world.creatures", packCreatures);
 
 command("world.creature", function (f) {
-    var c = creatureFields(parseInt(f.ref, 10));
+    var ref = parseInt(f.ref, 10);
+    var c = creatureFields(ref);
     if (c === null) {
         throw new Error("No creature at ref " + f.ref + ".");
     }
+    c.display = objectDisplayName(objectByRef(ref)) || "";
     return c;
+});
+
+// The name the player reads, for any object: the game's cItem::getName reads
+// the object's own name text (+0x3C) when it has one and its type's otherwise,
+// and both fields exist on creatures as on items.  Seen live: "Quinn, Agent of
+// the Crown" on a TYPE_NPC_THIEF_FEM, "Blood Bear" on a bear with no own name.
+// It goes through the game's text cache, on Frida's thread, as ui.string does.
+var objectNameFn = null;
+
+function objectDisplayName(obj) {
+    if (obj === null) {
+        return null;
+    }
+    if (objectNameFn === null) {
+        objectNameFn = new NativeFunction(at(RVA.itemName), "pointer", ["pointer"],
+                                          { abi: "thiscall" });
+    }
+    try {
+        var p = objectNameFn(obj);
+        return p.isNull() ? null : p.readUtf16String(200);
+    } catch (e) {
+        return null;
+    }
+}
+
+command("world.name", function (f) {
+    var obj = objectByRef(parseInt(f.ref, 10));
+    if (obj === null) {
+        throw new Error("No object at ref " + f.ref + ".");
+    }
+    return { ref: f.ref, name: objectDisplayName(obj) || "" };
 });
 
 // Every object, not only creatures.  What an object is comes from its type's
