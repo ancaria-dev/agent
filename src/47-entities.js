@@ -22,25 +22,23 @@ var companionPending = [];
 var lootDropping = null;
 
 var spawnHook = switchable("objCreate", RVA.objCreate, {
-    // The object is built inside create, so it is read on the way out.
-    onEnter: function (args) {
-        try {
-            this.ref = args[0].toUInt32() >>> 0;
-        } catch (e) {
-            this.ref = 0;
-        }
-    },
-    onLeave: function () {
-        if (!this.ref) {
+    // create(type, ref, ...) returns the ref it made.  The first argument is
+    // the type and the second the ref to restore, 0 for a new object: seen
+    // live on 154 calls, a Vampiric wolf among them (type 588, 0, ref 1181).
+    // Reading the first as the ref reported whatever object had the type's
+    // number for a ref.
+    onLeave: function (retval) {
+        var ref = retval.toUInt32() >>> 0;
+        if (!ref) {
             return;
         }
         if (lootDropping !== null) {
-            lootDropping.push(this.ref);
+            lootDropping.push(ref);
         }
-        var fields = creatureFields(this.ref);
+        var fields = creatureFields(ref);
         if (fields !== null) {
             evt("entity.spawn", fields);
-            companionPending.push({ ref: this.ref, type: fields.type, at: Date.now() });
+            companionPending.push({ ref: ref, type: fields.type, at: Date.now() });
         }
     }
 });
