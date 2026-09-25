@@ -22,6 +22,8 @@ var ITEM = {
     attack: 0x144,
     protectionA: 0x14A,
     protectionB: 0x14E,
+    nameText: 0x3C,
+    modFlags: 0x152,
     modIds: 0x162,
     modValues: 0x182,
     // A SECOND copy of the type id, and the reason retyping was cosmetic: we
@@ -38,6 +40,12 @@ var ITEM = {
 // at +0x162 and ends exactly where the value array begins at +0x182, which is
 // 8 words ending at +0x192.  Ids pair with values by index.
 //
+// A slot is three fields, not two.  The id dword carries a parameter in its
+// high word (803 with 5 reads "+15% Mental Regeneration": the attribute the
+// bonus comes from), and a flags word sits at +0x152.  Packed as
+// id:value[:param[:flags]], the last two only when set, so the common case
+// still reads 811:30.
+//
 // This is where an item's actual EFFECT lives, as opposed to its type id, which
 // is only what it is called.  Retyping a rune renames it and leaves it doing
 // what it did.
@@ -47,11 +55,21 @@ function readMods(obj) {
     var pairs = [];
     try {
         for (var i = 0; i < MOD_SLOTS; i++) {
-            var id = obj.add(ITEM.modIds + i * 4).readU16();
+            var full = obj.add(ITEM.modIds + i * 4).readU32() >>> 0;
+            var id = full & 0xFFFF;
             if (id === 0) {
                 break;
             }
-            pairs.push(id + ":" + obj.add(ITEM.modValues + i * 2).readU16());
+            var param = full >>> 16;
+            var flags = obj.add(ITEM.modFlags + i * 2).readU16();
+            var entry = id + ":" + obj.add(ITEM.modValues + i * 2).readU16();
+            if (param !== 0 || flags !== 0) {
+                entry += ":" + param;
+            }
+            if (flags !== 0) {
+                entry += ":" + flags;
+            }
+            pairs.push(entry);
         }
     } catch (e) {}
     return pairs.join(",");
@@ -60,19 +78,20 @@ function readMods(obj) {
 // Replaces the whole list, clearing the slots past it: "the modifiers are
 // exactly these".  Seen in the game: a sword rewritten to 811:30,809:25,802:20
 // lost its five old lines and showed Attack Speed +30, +25% to Attack and
-// Weapon Damage Fire +20.
+// Weapon Damage Fire +20.  That first rewrite wrote only the id word and left
+// an old param behind ("+25% Mental Regeneration to Attack"), which is why all
+// three fields are written now, a param or flags left out meaning 0.
 function writeMods(obj, packed) {
     var pairs = packed === "" ? [] : packed.split(",");
     for (var i = 0; i < MOD_SLOTS; i++) {
-        var id = 0;
-        var value = 0;
-        if (i < pairs.length) {
-            var half = pairs[i].split(":");
-            id = parseInt(half[0], 10) || 0;
-            value = parseInt(half[1], 10) || 0;
-        }
-        obj.add(ITEM.modIds + i * 4).writeU16(id);
-        obj.add(ITEM.modValues + i * 2).writeU16(value);
+        var part = i < pairs.length ? pairs[i].split(":") : [];
+        var id = (parseInt(part[0], 10) || 0) & 0xFFFF;
+        var value = parseInt(part[1], 10) || 0;
+        var param = (parseInt(part[2], 10) || 0) & 0xFFFF;
+        var flags = parseInt(part[3], 10) || 0;
+        obj.add(ITEM.modIds + i * 4).writeU32(((param << 16) | id) >>> 0);
+        obj.add(ITEM.modFlags + i * 2).writeU16(id === 0 ? 0 : flags);
+        obj.add(ITEM.modValues + i * 2).writeU16(id === 0 ? 0 : value);
     }
 }
 
