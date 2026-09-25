@@ -128,6 +128,23 @@ var CLASSES = {
 // typeName is cached per id, so asking costs a lookup the first time only.
 var CREATURE_TYPES = /^TYPE_(NPC|NATURE)_/;
 
+// Is this creature type a horse?  The game's own test (0x004266F0): byte +4
+// of a 0x56-byte record, picked by the word at type record +0x1A, in a table
+// the type object points to at +0x563008.  Live it is true on exactly the nine
+// TYPE_NATURE_HORSE types.
+function creatureIsHorse(typeId) {
+    if (typeId <= 0 || typeId >= 0x7E60) {
+        return false;
+    }
+    try {
+        var types = ptr(VA.itemTypes).readPointer();
+        var index = types.add(typeId * 0x80 + 0x1A).readU16();
+        return types.add(0x563008).readPointer().add(index * 0x56 + 4).readU8() === 4;
+    } catch (e) {
+        return false;
+    }
+}
+
 // A creature by ref, as flat wire fields, or null when the ref is not one.
 function creatureFields(ref) {
     var obj = objectByRef(ref);
@@ -153,7 +170,13 @@ function creatureFields(ref) {
             player: isHeroFull(obj) ? 1 : 0,
             // The CL_ class of the game's data (1 hero, 2 monster, 3 NPC,
             // 6 animal, 14 human...): read live on every creature of a town.
-            cclass: obj.add(0x1F0).readU32() >>> 0
+            cclass: obj.add(0x1F0).readU32() >>> 0,
+            // Horses, both read live: the horse a rider sits on or the rider
+            // on a horse, and the horse a creature owns or a horse's owner.
+            // 0 when none.  The hero keeps its own horse's ref even on foot.
+            mount: obj.add(0x1EC).readU32() >>> 0,
+            bond: obj.add(0x570).readU32() >>> 0,
+            horse: creatureIsHorse(typeId) ? 1 : 0
         };
     } catch (e) {
         return null;
