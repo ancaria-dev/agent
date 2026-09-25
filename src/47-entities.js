@@ -165,9 +165,10 @@ function objectFamily(typeId) {
     }
 }
 
-// Who holds a carried object: the creature wearing it, or the chest it lies in.
-// The game keeps no back pointer, so the holders are walked once per question.
-// An object in none of them (an inventory, the cursor) stays without an owner.
+// Who holds a carried object: the creature wearing it or carrying it in its
+// bag, or the chest it lies in.  The game keeps no back pointer, so the
+// holders are walked once per question.  An object in none of them (a
+// merchant's stock, the cursor) stays without an owner.
 function objectOwners(table, count) {
     var owners = {};
     for (var ref = 1; ref < count; ref++) {
@@ -193,6 +194,26 @@ function objectOwners(table, count) {
             }
         } catch (e) {}
     }
+    // Bags: the manager's 32, each owned by the creature whose ref is its
+    // index.  Only the top-left cell of an item holds its ref.
+    try {
+        var bags = ptr(VA.inventories).readPointer();
+        for (var i = 1; !bags.isNull() && i < 32 && i < count; i++) {
+            var bag = bags.add(i * 0x1180);
+            var holder = table.add(i * 4).readPointer();
+            if (bag.add(0x1160).readU16() !== i || holder.isNull() ||
+                    objectFamily(holder.add(0x10).readU32() >>> 0) !== FAMILY_CREATURE) {
+                continue;
+            }
+            var cells = bag.add(0x115C).readU16() * bag.add(0x115E).readU16();
+            for (var c = 0; c < cells && c < 368; c++) {
+                var held = bag.add(0x18 + c * 12).readU32() >>> 0;
+                if (held) {
+                    owners[held] = i;
+                }
+            }
+        }
+    } catch (e) {}
     return owners;
 }
 
