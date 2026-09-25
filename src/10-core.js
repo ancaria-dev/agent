@@ -330,17 +330,19 @@ function switchable(name, rva, callbacks) {
 // "steal", turns any exception inside it into "system error" and aborts the
 // call, and cCommand_exitGame::execute raises one it handles itself: with
 // "steal", Quit simply stopped working.  Same name-first shape as hook(), so
-// the manifest lists the site and --no-hook reaches it.
+// the manifest lists the site and --no-hook reaches it.  thiscall unless the
+// last argument names another convention.
 var replacements = [];
 
-function replaced(name, rva, ret, argTypes, make) {
+function replaced(name, rva, ret, argTypes, make, abi) {
     if (DISABLED.indexOf(name) >= 0) {
         console.log("hook " + name + " disabled");
         return;
     }
+    var convention = abi || "thiscall";
     var original = new NativeFunction(at(rva), ret, argTypes,
-                                      { abi: "thiscall", exceptions: "propagate" });
-    var callback = new NativeCallback(make(original), ret, argTypes, "thiscall");
+                                      { abi: convention, exceptions: "propagate" });
+    var callback = new NativeCallback(make(original), ret, argTypes, convention);
     // A NativeCallback nobody references is collected, and the game then
     // jumps into freed memory.
     replacements.push(callback);
