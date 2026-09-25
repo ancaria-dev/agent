@@ -90,7 +90,7 @@ onHero(function () {
 
 // Every creature the object manager holds, as one frame: a mod asking "what is
 // around" wants the whole answer, and a round-trip per creature would be
-// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player:cclass joined by
+// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player:cclass:mount:bond:horse joined by
 // `;`, and each type name is sent once, as type=NAME joined by `,`.  Names are
 // TYPE_ plus capitals, digits and underscores, so neither separator can occur
 // inside one.
@@ -120,7 +120,7 @@ function packCreatures(f) {
             continue;
         }
         out.push([c.ref, c.type, c.level, c.hp, c.maxHp, c.x, c.y,
-                  c.player, c.cclass].join(":"));
+                  c.player, c.cclass, c.mount, c.bond, c.horse].join(":"));
         names[c.type] = c.name;
     }
     var named = [];
@@ -328,6 +328,40 @@ command("world.object", function (f) {
     var o = objectRecord(ref, obj, objectOwners(table, count));
     o.name = typeName(o.type) || "";
     return o;
+});
+
+// The hero getting on and off a horse.  Mounting equips the horse into slot
+// 18 and links the two through +0x1EC, both ways; getting off clears it.
+// Sampled, not hooked: the equip function runs for every item the hero puts
+// on.  A load starts over, so the horse a save begins on is not a change.
+var mountLast = null;
+
+onTickEvery(250, function () {
+    if (isLoading() || !live(heroFull)) {
+        mountLast = null;
+        return;
+    }
+    var now;
+    try {
+        now = heroFull.add(0x1EC).readU32() >>> 0;
+    } catch (e) {
+        return;
+    }
+    var before = mountLast;
+    mountLast = now;
+    if (before === null || before === now) {
+        return;
+    }
+    if (before !== 0) {
+        evt("horse.dismount", { horse: before });
+    }
+    if (now !== 0) {
+        evt("horse.mount", { horse: now });
+    }
+});
+
+onHero(function () {
+    mountLast = null;
 });
 
 // The same call the game's sudden-death action makes.  Nothing but creatures:
