@@ -451,7 +451,8 @@ onHero(function () {
 // game's HorseData table: a map from the horse's class (+0x400, 0 meaning 1)
 // to seven numbers.  Seen live on a Light War Horse, class 7: speed 145,
 // charge attack regeneration 70 s, riding needed 0, as its window shows.
-// The window scales the other four by level and the rider's riding skill.
+// The window scales the other four by level and the rider's riding skill
+// inline, with no function of its own to ask, so they are left out.
 function horseRow(key) {
     var head = ptr(VA.horseData).readPointer();
     var node = head.add(4).readPointer();
@@ -481,6 +482,9 @@ command("world.horse", function (f) {
         throw new Error("No horse data for class " + key + ".");
     }
     c.hclass = key;
+    // The name the window shows, "Light Nag" or "Light War Horse": text
+    // 0x236D + class, as 0x004267A0 numbers it.
+    c.className = textById(0x236D + Math.min(key, 9)) || "";
     c.speed = row[0];
     c.chargeRegen = row[5];
     c.riding = row[6];
