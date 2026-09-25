@@ -95,10 +95,63 @@ function writeMods(obj, packed) {
     }
 }
 
+// What the player reads: the name and the modifier lines exactly as the
+// tooltip shows them, from the game's own functions.  cItem::getName takes the
+// item's own name text when it has one (a magic item's whole name, "Fabulous
+// Helmet of Oblivion") and its type's otherwise.  The tooltip's line builder
+// formats one modifier slot of a block that starts at item + 0x118, and works
+// as well on a block built here, which is how any id gets its text.
+//
+// Both go through the game's text cache, which may read a text it has not
+// needed yet from global.res and keep it.  Commands call them on Frida's
+// thread, as ui.string always has.
+var ITEM_BLOCK = 0x118;
+var BLOCK_SIZE = 0x80;
+var itemText = null;
+
+function itemTextNatives() {
+    if (itemText === null) {
+        itemText = {
+            name: new NativeFunction(at(RVA.itemName), "pointer", ["pointer"],
+                                     { abi: "thiscall" }),
+            line: new NativeFunction(at(RVA.modifierLine), "void",
+                                     ["pointer", "pointer", "pointer", "int", "pointer"],
+                                     { abi: "thiscall" }),
+            out: Memory.alloc(4096),
+            cursor: Memory.alloc(4),
+            block: Memory.alloc(BLOCK_SIZE)
+        };
+    }
+    return itemText;
+}
+
+function itemDisplayName(obj) {
+    var p = itemTextNatives().name(obj);
+    return p.isNull() ? null : p.readUtf16String(200);
+}
+
+// One tooltip line of a block, as [colour, text]; null for an empty slot.
+// The game writes "\cAARRGGBB" before the text and a newline after it.
+function modifierLine(block, index) {
+    var n = itemTextNatives();
+    n.out.writeU32(0);
+    n.cursor.writePointer(n.out);
+    n.line(block, n.cursor, block, index, ptr(0));
+    var text = n.out.readUtf16String(2000) || "";
+    var colour = "";
+    var m = /^\\c([0-9a-fA-F]{8})/.exec(text);
+    if (m !== null) {
+        colour = m[1].toLowerCase();
+        text = text.substring(m[0].length);
+    }
+    text = text.replace(/\s+$/, "");
+    return text === "" ? null : [colour, text];
+}
+
 // Flat fields, because that is what the wire carries.  The display name is
-// deliberately absent: Sacred composes item names from affixes ("Damaged" +
-// base + "of Oblivion") and there is no single string to read, so the internal
-// type name is the stable key and the one a mod should match on.
+// left to item.info: it comes from the game's text cache, and item events fire
+// for every piece a spawning NPC puts on.  The internal type name is the
+// stable key and the one a mod should match on.
 function itemFields(ref) {
     var obj = objectByRef(ref);
     if (obj === null) {
@@ -192,7 +245,51 @@ function reshape(ref, changes) {
 }
 
 command("item.info", function (f) {
-    return itemFields(parseInt(f.ref, 10));
+    var ref = parseInt(f.ref, 10);
+    var fields = itemFields(ref);
+    var obj = objectByRef(ref);
+    if (obj !== null) {
+        try {
+            fields.display = itemDisplayName(obj) || "";
+        } catch (e) {}
+    }
+    return fields;
+});
+
+// The tooltip's modifier lines of one item: text joined by newlines, colours
+// (AARRGGBB) joined by commas, in slot order.
+command("item.lines", function (f) {
+    var obj = objectByRef(parseInt(f.ref, 10));
+    if (obj === null) {
+        throw new Error("No item found at ref " + f.ref + ".");
+    }
+    var texts = [];
+    var colours = [];
+    for (var i = 0; i < MOD_SLOTS; i++) {
+        var line = modifierLine(obj.add(ITEM_BLOCK), i);
+        if (line !== null) {
+            colours.push(line[0]);
+            texts.push(line[1]);
+        }
+    }
+    return { ref: f.ref, n: texts.length, lines: texts.join("\n"), colours: colours.join(",") };
+});
+
+// Any modifier's text for a value, from a one-slot block built here.
+command("item.modtext", function (f) {
+    var id = parseInt(f.id, 10);
+    if (isNaN(id) || id <= 0 || id > 0xFFFF) {
+        throw new Error("A modifier id is 1..65535.");
+    }
+    var n = itemTextNatives();
+    for (var i = 0; i < BLOCK_SIZE; i += 4) {
+        n.block.add(i).writeU32(0);
+    }
+    n.block.add(0x3A).writeU16(parseInt(f.flags, 10) || 0);
+    n.block.add(0x4A).writeU32((((parseInt(f.param, 10) || 0) & 0xFFFF) << 16 | id) >>> 0);
+    n.block.add(0x6A).writeU16(parseInt(f.value, 10) || 0);
+    var line = modifierLine(n.block, 0);
+    return line === null ? { id: id, text: "" } : { id: id, text: line[1], colour: line[0] };
 });
 
 // Fields are named exactly as they arrive on an item event, so a mod that read
