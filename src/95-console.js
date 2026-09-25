@@ -139,3 +139,55 @@ command("console.print", function (f) {
     consoleQueue.push(text);
     return { queued: consoleQueue.length };
 });
+
+// An announcement in the middle of the screen, the way the game shows "The
+// final battle is near!": a cEvent_engine with id 0xB whose +0x10 is a text
+// id, sent through the kernel with (0, 0).  The event carries the id, not the
+// text, so only a key the game's dictionary knows can be shown.  Seen live with
+// UI_REGION_FINALBATTLE.
+var MESSAGE_EVENT = 0xB;
+var MESSAGE_EVENT_SIZE = 0x24;
+var messageNative = null;
+
+function messageNatives() {
+    if (messageNative === null) {
+        messageNative = {
+            textId: new NativeFunction(at(RVA.textId), "uint32", ["pointer"], { abi: "mscdecl" }),
+            event: Memory.alloc(MESSAGE_EVENT_SIZE)
+        };
+    }
+    return messageNative;
+}
+
+function messageSend(id) {
+    messageNatives();
+    var n = consoleNatives();
+    var ev = messageNative.event;
+    for (var i = 0; i < MESSAGE_EVENT_SIZE; i += 4) {
+        ev.add(i).writeU32(0);
+    }
+    ev.writePointer(ptr(VA.engineEventVtable));
+    ev.add(4).writeU32(MESSAGE_EVENT);
+    ev.add(8).writeU32(0x10);
+    ev.add(0x0C).writeU32(3);
+    ev.add(0x10).writeU32(id);
+    var kernel = n.kernel();
+    if (!kernel.isNull()) {
+        n.send(kernel, ev, 0, 0);
+    }
+}
+
+command("ui.message", function (f) {
+    var key = f.key === undefined ? "" : String(f.key);
+    if (!/^[A-Za-z0-9_]+$/.test(key)) {
+        throw new Error("A message needs the key of a game text.");
+    }
+    var id = messageNatives().textId(Memory.allocAnsiString(key)) >>> 0;
+    if (id === 0) {
+        throw new Error("The game has no text " + key + ".");
+    }
+    if (!later(function () { messageSend(id); })) {
+        throw new Error("Too many game calls waiting.");
+    }
+    return { key: key, id: id };
+});
