@@ -173,6 +173,37 @@ command("world.areas", function () {
     return { n: out.length, areas: out.join(";"), names: names.join("|") };
 });
 
+// The kills an area still needs.  The game has no setter, only the kill count
+// that subtracts, so the field is written on the engine thread.  At 1000 or
+// more the final-battle flag is cleared as well, so the announcement can come
+// again the way it would on a fresh area.
+command("world.area_set", function (f) {
+    var left = parseInt(f.left, 10);
+    if (isNaN(left) || left < 0 || left > 1000000) {
+        throw new Error("left must be 0..1000000.");
+    }
+    var index = -1;
+    for (var i = 0; i < AREA_ENTRIES; i++) {
+        if (areaKey(ptr(VA.areas).add(i * AREA_SIZE)) === f.key) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0) {
+        throw new Error("No area " + f.key + ".");
+    }
+    var entry = ptr(VA.areas).add(index * AREA_SIZE);
+    if (!later(function () {
+        entry.add(0x38).writeU32(left);
+        if (left >= AREA_FINALE_BELOW) {
+            entry.add(0x34).writeU8(0);
+        }
+    })) {
+        throw new Error("Too many game calls waiting.");
+    }
+    return { key: f.key, left: left };
+});
+
 // Sampled, not hooked: the hero's area follows its sector, and an area is
 // cleared inside the kill statistics.  A kill counts in the victim's area,
 // which is why every area is watched, not only the hero's.
