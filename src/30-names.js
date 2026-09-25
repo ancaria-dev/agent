@@ -63,6 +63,30 @@ function uiString(key) {
     }
 }
 
+// A text by its number, the way the game's own windows read one: the text
+// table from getTexts, then getText, whose entry starts with the string.
+var textNatives = null;
+
+function textById(id) {
+    try {
+        if (textNatives === null) {
+            textNatives = {
+                texts: new NativeFunction(at(RVA.getTexts), "pointer", [], { abi: "mscdecl" }),
+                get: new NativeFunction(at(RVA.getText), "pointer", ["pointer", "uint32"],
+                                        { abi: "thiscall" })
+            };
+        }
+        var entry = textNatives.get(textNatives.texts(), id >>> 0);
+        if (entry.isNull()) {
+            return null;
+        }
+        var str = entry.readPointer();
+        return str.isNull() ? null : str.readUtf16String(200);
+    } catch (e) {
+        return null;
+    }
+}
+
 // The reverse direction: name -> id.
 //
 // A mod must never hardcode a type id.  They are build-specific numbers with no
