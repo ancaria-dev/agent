@@ -14,6 +14,10 @@
 // reload did survive with them attached, but the switch costs nothing and the
 // failure it prevents is a hard crash.
 
+// Creatures made in play, waiting to be seen following the hero.  See the
+// companion sampler below.
+var companionPending = [];
+
 // Refs created while a loot drop runs, or null outside one.  See lootDrop.
 var lootDropping = null;
 
@@ -36,6 +40,7 @@ var spawnHook = switchable("objCreate", RVA.objCreate, {
         var fields = creatureFields(this.ref);
         if (fields !== null) {
             evt("entity.spawn", fields);
+            companionPending.push({ ref: this.ref, type: fields.type, at: Date.now() });
         }
     }
 });
@@ -90,7 +95,7 @@ onHero(function () {
 
 // Every creature the object manager holds, as one frame: a mod asking "what is
 // around" wants the whole answer, and a round-trip per creature would be
-// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player:cclass:mount:bond:horse joined by
+// hundreds of them.  Records are ref:type:level:hp:maxHp:x:y:player:cclass:mount:bond:horse:lead joined by
 // `;`, and each type name is sent once, as type=NAME joined by `,`.  Names are
 // TYPE_ plus capitals, digits and underscores, so neither separator can occur
 // inside one.
@@ -120,7 +125,7 @@ function packCreatures(f) {
             continue;
         }
         out.push([c.ref, c.type, c.level, c.hp, c.maxHp, c.x, c.y,
-                  c.player, c.cclass, c.mount, c.bond, c.horse].join(":"));
+                  c.player, c.cclass, c.mount, c.bond, c.horse, c.lead].join(":"));
         names[c.type] = c.name;
     }
     var named = [];
@@ -362,6 +367,86 @@ onTickEvery(250, function () {
 
 onHero(function () {
     mountLast = null;
+});
+
+// Companions: creatures that follow the hero, which the game marks by the
+// hero's ref at +0x251.  Seen live on a Vampiress's wolf: the summoned wolf
+// has it from the start, and when a second wolf replaces it the first drops
+// to 0 HP with -1 there.  A summon is made in play, so only creatures the
+// create hook saw are watched for a few seconds, rather than walking the
+// whole object table.  After a load, the table is walked once for the
+// companions the save brought along, and those are not reported as joining.
+var COMPANION_WAIT = 5000;
+var companions = null;
+
+function companionHeroRef() {
+    return heroFull.add(0x0C).readU32() >>> 0;
+}
+
+function companionFollows(ref, type, hero) {
+    var c = creatureFields(ref);
+    return c !== null && c.type === type && c.lead === hero && c.hp > 0;
+}
+
+function companionScan(hero) {
+    var found = {};
+    var mgr = ptr(VA.objectManager).readPointer();
+    if (mgr.isNull()) {
+        return found;
+    }
+    var count = (mgr.add(8).readPointer().toUInt32() -
+                 mgr.add(4).readPointer().toUInt32()) >> 2;
+    for (var ref = 1; ref < count; ref++) {
+        var c = creatureFields(ref);
+        if (c !== null && c.lead === hero && c.hp > 0) {
+            found[ref] = c.type;
+        }
+    }
+    return found;
+}
+
+onTickEvery(500, function () {
+    if (isLoading() || !live(heroFull)) {
+        companions = null;
+        companionPending = [];
+        return;
+    }
+    var hero;
+    try {
+        hero = companionHeroRef();
+    } catch (e) {
+        return;
+    }
+    if (companions === null) {
+        companions = companionScan(hero);
+        companionPending = [];
+        return;
+    }
+    for (var ref in companions) {
+        if (!companionFollows(parseInt(ref, 10), companions[ref], hero)) {
+            evt("companion.left", { ref: ref, type: companions[ref],
+                                    name: typeName(companions[ref]) || "" });
+            delete companions[ref];
+        }
+    }
+    var now = Date.now();
+    var waiting = [];
+    for (var i = 0; i < companionPending.length; i++) {
+        var p = companionPending[i];
+        if (companionFollows(p.ref, p.type, hero)) {
+            companions[p.ref] = p.type;
+            var fields = creatureFields(p.ref);
+            fields.display = objectDisplayName(objectByRef(p.ref)) || "";
+            evt("companion.joined", fields);
+        } else if (now - p.at < COMPANION_WAIT) {
+            waiting.push(p);
+        }
+    }
+    companionPending = waiting;
+});
+
+onHero(function () {
+    companions = null;
 });
 
 // The same call the game's sudden-death action makes.  Nothing but creatures:
