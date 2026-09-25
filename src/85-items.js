@@ -19,7 +19,14 @@ var ITEM = {
     percent: 0x119,
     minLevel: 0x12C,
     level: 0x131,
+    // Words, not bytes: a sword set to 150 read 150 here, and the damage words
+    // next to it held 20..24 physical, 10..14 fire and 8..12 magic, the
+    // tooltip's own numbers.  Minimums at +0x134, maximums eight bytes on, in
+    // the order physical, fire, magic, poison.
     attack: 0x144,
+    defense: 0x146,
+    damageMin: 0x134,
+    damageMax: 0x13C,
     protectionA: 0x14A,
     protectionB: 0x14E,
     nameText: 0x3C,
@@ -165,7 +172,16 @@ function itemFields(ref) {
             name: typeName(typeId) || ("type" + typeId),
             level: obj.add(ITEM.level).readU8(),
             min: obj.add(ITEM.minLevel).readU8(),
-            atk: obj.add(ITEM.attack).readU8(),
+            atk: obj.add(ITEM.attack).readU16(),
+            def: obj.add(ITEM.defense).readU16(),
+            pmin: obj.add(ITEM.damageMin).readU16(),
+            fmin: obj.add(ITEM.damageMin + 2).readU16(),
+            mmin: obj.add(ITEM.damageMin + 4).readU16(),
+            xmin: obj.add(ITEM.damageMin + 6).readU16(),
+            pmax: obj.add(ITEM.damageMax).readU16(),
+            fmax: obj.add(ITEM.damageMax + 2).readU16(),
+            mmax: obj.add(ITEM.damageMax + 4).readU16(),
+            xmax: obj.add(ITEM.damageMax + 6).readU16(),
             prot: obj.add(ITEM.protectionA).readU8() +
                   obj.add(ITEM.protectionB).readU8(),
             pct: obj.add(ITEM.percent).readU8(),
@@ -191,12 +207,16 @@ function itemFields(ref) {
 // affixes at draw time, so the type is the only handle, and changing it changes
 // the name as a consequence.
 //
-// The other mapped fields (level, attack, protection) are plain bytes and are
-// writable the same way.  They are exposed through the same command so a mod
-// does not need a new one per field.
+// The other mapped fields (levels, attack, defense, damage, price) are plain
+// numbers and writable the same way, through the same command, so a mod does
+// not need a new one per field.  The second number is the width in bytes.
 var WRITABLE = { level: [ITEM.level, 1], min: [ITEM.minLevel, 1],
-                 atk: [ITEM.attack, 1], pct: [ITEM.percent, 1],
-                 price: [ITEM.price, 4] };
+                 atk: [ITEM.attack, 2], def: [ITEM.defense, 2],
+                 pct: [ITEM.percent, 1], price: [ITEM.price, 4],
+                 pmin: [ITEM.damageMin, 2], fmin: [ITEM.damageMin + 2, 2],
+                 mmin: [ITEM.damageMin + 4, 2], xmin: [ITEM.damageMin + 6, 2],
+                 pmax: [ITEM.damageMax, 2], fmax: [ITEM.damageMax + 2, 2],
+                 mmax: [ITEM.damageMax + 4, 2], xmax: [ITEM.damageMax + 6, 2] };
 
 function reshape(ref, changes) {
     var obj = objectByRef(ref);
@@ -235,6 +255,8 @@ function reshape(ref, changes) {
         try {
             if (field[1] === 4) {
                 obj.add(field[0]).writeU32(value >>> 0);
+            } else if (field[1] === 2) {
+                obj.add(field[0]).writeU16(value & 0xFFFF);
             } else {
                 obj.add(field[0]).writeU8(value & 0xFF);
             }
