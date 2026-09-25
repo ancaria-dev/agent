@@ -140,6 +140,142 @@ command("world.creature", function (f) {
     return c;
 });
 
+// Every object, not only creatures.  What an object is comes from its type's
+// family, the byte the game's own debug dump counts objects by (itemTypeFamily,
+// 0x00426220): 3 every creature, 4 chests and barrels, 5 weapons, 10 doors, 12
+// effects, 28 runes.  Read here rather than called, one byte per type.
+var OBJECT_TYPE_LIMIT = 0x7E60;
+var OBJECT_RECORD = 0x80;
+var OBJECT_FAMILY = 0x2E;
+var OBJECT_SECTOR = 0x18;
+var FAMILY_CREATURE = 3;
+var FAMILY_CONTAINER = 4;
+var EQUIPMENT = 0x1A4;
+var EQUIPMENT_SLOTS = 19;
+
+function objectFamily(typeId) {
+    if (typeId <= 0 || typeId >= OBJECT_TYPE_LIMIT) {
+        return 0;
+    }
+    try {
+        return ptr(VA.itemTypes).readPointer()
+            .add(typeId * OBJECT_RECORD + OBJECT_FAMILY).readU8();
+    } catch (e) {
+        return 0;
+    }
+}
+
+// Who holds a carried object: the creature wearing it, or the chest it lies in.
+// The game keeps no back pointer, so the holders are walked once per question.
+// An object in none of them (an inventory, the cursor) stays without an owner.
+function objectOwners(table, count) {
+    var owners = {};
+    for (var ref = 1; ref < count; ref++) {
+        var obj = table.add(ref * 4).readPointer();
+        if (obj.isNull()) {
+            continue;
+        }
+        try {
+            var family = objectFamily(obj.add(0x10).readU32() >>> 0);
+            if (family === FAMILY_CREATURE) {
+                for (var s = 0; s < EQUIPMENT_SLOTS; s++) {
+                    var worn = obj.add(EQUIPMENT + s * 4).readU32() >>> 0;
+                    if (worn) {
+                        owners[worn] = ref;
+                    }
+                }
+            } else if (family === FAMILY_CONTAINER) {
+                var begin = obj.add(0x1E4).readPointer();
+                var end = obj.add(0x1E8).readPointer();
+                for (var p = begin; !begin.isNull() && p.compare(end) < 0; p = p.add(4)) {
+                    owners[p.readU32() >>> 0] = ref;
+                }
+            }
+        } catch (e) {}
+    }
+    return owners;
+}
+
+// ref:type:kind:sector:x:y:owner, owner -1 when none is known.  A sector of 0
+// means the object is not lying in the world: carried, worn or in a chest.
+function objectRecord(ref, obj, owners) {
+    var type = obj.add(0x10).readU32() >>> 0;
+    var owner = owners === null ? undefined : owners[ref];
+    return {
+        ref: ref,
+        type: type,
+        kind: objectFamily(type),
+        sector: obj.add(OBJECT_SECTOR).readU16(),
+        x: obj.add(0x1C).readS32(),
+        y: obj.add(0x20).readS32(),
+        owner: owner === undefined ? -1 : owner
+    };
+}
+
+// The whole table is thousands of objects (3600 in a town), so one frame with
+// each type's name sent once, the way world.creatures packs.  With x, y and
+// radius, only objects lying in the world near that point, and no owner walk.
+// With kind, only that family.
+function packObjects(f) {
+    var mgr = ptr(VA.objectManager).readPointer();
+    if (mgr.isNull()) {
+        return { n: 0, objects: "", names: "" };
+    }
+    var table = mgr.add(4).readPointer();
+    var count = (mgr.add(8).readPointer().toUInt32() - table.toUInt32()) >> 2;
+    var near = f.radius !== undefined;
+    var cx = parseInt(f.x, 10);
+    var cy = parseInt(f.y, 10);
+    var r2 = Math.pow(parseInt(f.radius, 10) || 0, 2);
+    var kind = f.kind === undefined ? -1 : parseInt(f.kind, 10);
+    var owners = near ? null : objectOwners(table, count);
+    var out = [];
+    var names = {};
+    for (var ref = 1; ref < count; ref++) {
+        var obj = table.add(ref * 4).readPointer();
+        if (obj.isNull()) {
+            continue;
+        }
+        try {
+            var o = objectRecord(ref, obj, owners);
+            if (kind >= 0 && o.kind !== kind) {
+                continue;
+            }
+            if (near && (o.sector === 0 ||
+                         Math.pow(o.x - cx, 2) + Math.pow(o.y - cy, 2) > r2)) {
+                continue;
+            }
+            out.push([o.ref, o.type, o.kind, o.sector, o.x, o.y, o.owner].join(":"));
+            if (names[o.type] === undefined) {
+                names[o.type] = typeName(o.type) || "";
+            }
+        } catch (e) {}
+    }
+    var named = [];
+    for (var type in names) {
+        if (names[type] !== "") {
+            named.push(type + "=" + names[type]);
+        }
+    }
+    return { n: out.length, objects: out.join(";"), names: named.join(",") };
+}
+
+command("world.objects", packObjects);
+
+command("world.object", function (f) {
+    var ref = parseInt(f.ref, 10);
+    var obj = objectByRef(ref);
+    if (obj === null) {
+        throw new Error("No object at ref " + f.ref + ".");
+    }
+    var mgr = ptr(VA.objectManager).readPointer();
+    var table = mgr.add(4).readPointer();
+    var count = (mgr.add(8).readPointer().toUInt32() - table.toUInt32()) >> 2;
+    var o = objectRecord(ref, obj, objectOwners(table, count));
+    o.name = typeName(o.type) || "";
+    return o;
+});
+
 // The same call the game's sudden-death action makes.  Nothing but creatures:
 // an item has no HP table, and the index would land in the middle of it.
 function creatureAt(ref) {
