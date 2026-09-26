@@ -118,7 +118,7 @@ command("world.enemies", function (f) {
 
 // The game's own class setter, the one the quest scripts use.  The creature
 // is found again on the engine thread: the game reuses a ref once its
-// creature is gone.
+// creature is gone.  The reply is the creature as the setter left it.
 //
 // Class 0 means "as it was": the class the creature had before the loader
 // first changed it.  The setter's own reset gives the class of the type's
@@ -127,18 +127,15 @@ command("world.enemies", function (f) {
 // is only the fallback for a creature the loader never changed.
 var allyOriginal = {};
 
-command("world.class_set", function (f) {
-    var ref = parseInt(f.ref, 10);
+commandLater("world.class_set", function (f) {
     var cls = f.cls === "0" ? 0 : allyClassArg(f.cls, "cls");
-    var before = creatureFields(ref);
-    if (before === null) {
-        throw new Error("No creature at ref " + f.ref + ".");
-    }
+    var before = creatureExpected(f);
+    var ref = before.ref;
     allyWorld();
-    if (!later(function () {
+    return function () {
         var now = creatureFields(ref);
         if (now === null || now.type !== before.type) {
-            return;
+            throw new Error("The creature at ref " + ref + " is gone.");
         }
         var kept = allyOriginal[ref];
         if (kept !== undefined && kept.type !== now.type) {
@@ -152,16 +149,14 @@ command("world.class_set", function (f) {
             } else {
                 allyFns().setClass(objectByRef(ref), 0, 0);
             }
-            return;
+        } else {
+            if (kept === undefined) {
+                allyOriginal[ref] = { type: now.type, cls: now.cclass };
+            }
+            allyFns().setClass(objectByRef(ref), 1, cls);
         }
-        if (kept === undefined) {
-            allyOriginal[ref] = { type: now.type, cls: now.cclass };
-        }
-        allyFns().setClass(objectByRef(ref), 1, cls);
-    })) {
-        throw new Error("Too many game calls waiting.");
-    }
-    return { ref: ref, cls: cls };
+        return creatureFields(ref);
+    };
 });
 
 // A change to the matrix, whoever made it: a mod, a quest effect, a loaded
