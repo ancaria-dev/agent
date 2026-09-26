@@ -494,23 +494,15 @@ command("world.horse", function (f) {
 
 // The same call the game's sudden-death action makes.  Nothing but creatures:
 // an item has no HP table, and the index would land in the middle of it.
-function creatureAt(ref) {
-    var c = creatureFields(ref);
-    if (c === null) {
-        throw new Error("No creature at ref " + ref + ".");
-    }
-    return objectByRef(ref);
-}
-
 command("world.hp", function (f) {
-    var ref = parseInt(f.ref, 10);
-    setCreatureStat(creatureAt(ref), parseInt(f.value, 10), STAT_CURRENT_HP);
+    var ref = creatureExpected(f).ref;
+    setCreatureStat(objectByRef(ref), parseInt(f.value, 10), STAT_CURRENT_HP);
     return creatureFields(ref);
 });
 
 command("world.kill", function (f) {
-    var ref = parseInt(f.ref, 10);
-    setCreatureStat(creatureAt(ref), 0, STAT_CURRENT_HP);
+    var ref = creatureExpected(f).ref;
+    setCreatureStat(objectByRef(ref), 0, STAT_CURRENT_HP);
     return creatureFields(ref);
 });
 
