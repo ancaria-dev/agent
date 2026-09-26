@@ -96,11 +96,12 @@ hook("artRaise", RVA.artRaise, function () {
 });
 
 // Every art the hero owns, in vector order, one record per `;`:
-// index:id:aspect:level:bonus.
-command("player.arts", function () {
+// index:id:aspect:level:bonus, and the hero's class, which for the Vampiress
+// says her form.  Null when there is no hero.  The combos answer carries it too.
+function artsPacked() {
     var span = heroArtSpan();
-    if (span === null) {
-        throw new Error("No hero found. Load a world first.");
+    if (span === null || !live(heroFull)) {
+        return null;
     }
     var count = span[1].sub(span[0]).toUInt32() / ART_SIZE;
     var out = [];
@@ -108,7 +109,15 @@ command("player.arts", function () {
         var art = artFields(span[0].add(i * ART_SIZE), i);
         out.push([art.index, art.id, art.aspect, art.level, art.bonus].join(":"));
     }
-    return { n: out.length, arts: out.join(";") };
+    return { n: out.length, arts: out.join(";"), cls: heroFull.add(0x10).readU32() };
+}
+
+command("player.arts", function () {
+    var packed = artsPacked();
+    if (packed === null) {
+        throw new Error("No hero found. Load a world first.");
+    }
+    return packed;
 });
 
 // The base level, written where a rune writes it.  The game sets bit 0 of
