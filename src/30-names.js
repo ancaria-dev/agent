@@ -210,6 +210,21 @@ function creatureFields(ref) {
     }
 }
 
+// The creature a command names by `ref`, as fields, or an error.  The game
+// hands a gone creature's ref to the next object it makes, so a caller that
+// knows which type it expects there sends it as `type`, and a different
+// creature at that ref is refused rather than acted on.
+function creatureExpected(f) {
+    var c = creatureFields(parseInt(f.ref, 10));
+    if (c === null) {
+        throw new Error("No creature at ref " + f.ref + ".");
+    }
+    if (f.type !== undefined && f.type !== "" && parseInt(f.type, 10) !== c.type) {
+        throw new Error("The creature at ref " + f.ref + " is gone.");
+    }
+    return c;
+}
+
 function describe(full) {
     if (!live(full)) {
         return null;
