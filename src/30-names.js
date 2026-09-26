@@ -120,6 +120,13 @@ function typeIds() {
     return found;
 }
 
+// Built once the hero is in a world, while the game is still settling, rather
+// than on the first pickup a mod retypes by name: the scan holds the script
+// for about 130 ms, and inside a pickup verdict the game would wait on it.
+onHero(function () {
+    setTimeout(typeIds, 0);
+});
+
 command("type.find", function (f) {
     var id = typeIds()[f.name];
     return id === undefined ? { name: f.name } : { name: f.name, id: id };
