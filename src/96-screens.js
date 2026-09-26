@@ -526,3 +526,356 @@ hook("heroAction", RVA.heroAction, {
         }
     }
 });
+
+// Opening and closing a window for a mod, the way the player's key does it:
+// the same UI event the game builds for that key or click, sent the same way.
+// The inventory's keys I, F and C are one event with the tab in [ev+0xC]; the
+// map's and the journal's keys go to the UI manager, the console's comes from
+// the engine, and Esc names itself as the sender.  A merchant, a blacksmith
+// and a combat master open from a creature the way talking to it does: the
+// inventory, the window, then the window's setup event with the creature's
+// level and ref.  The hero's own chest, the one with a window, opens from the
+// two messages the hero's click sends it: 0x21 lifts the lid, 3 with "take"
+// shows its window beside the inventory.  Any other chest or barrel answers
+// the same two by dropping its loot, so only the hero's chest is taken here.
+// Closing any of those four is Esc's way: the inventory closes, and takes
+// them with it.
+//
+// Everything is sent from the engine thread (commandOnEngine), the one the
+// game handles its keys on.  The esc menu's opening pauses the game through a
+// path that raises and handles its own exception, so every call into the game
+// here propagates exceptions; without that the menu was left flagged open,
+// unseen, and the game paused.  A call made from the tick is invisible to the
+// hooks above, so a
+// mod's own move is not asked about, and its halves are reported here: the
+// manager's window list is read before and after, and every reported window
+// whose visibility changed gets its "ui.shown" or "ui.hidden".
+//
+//   ui.windows          which reported windows are open, and the inventory tab
+//   ui.open / ui.close  window, plus tab (inventory) or ref (the four above)
+//   ui.toggle           window, plus tab: the key's own behaviour
+
+var SCREEN_FLAG_KEY = 5;            // [ev+8] from a key or a button
+var SCREEN_FLAG_ESC = 1;            // and from the Esc key
+var SCREEN_FLAG_ITEM = 1;           // and from a click on an item
+var SCREEN_FLAG_TASKBAR = 0x10;     // a taskbar button's state
+var SCREEN_EVENT_SIZE = 0x80;
+var SCREEN_FROM = 0x28;
+var SCREEN_TO = 0x48;
+var SCREEN_TEXT_MAX = 31;
+var SCREEN_WINDOWS_FIRST = 0x80;    // the manager's window pointers, +0x80..+0xD8
+var SCREEN_WINDOWS_LAST = 0xD8;
+var SCREEN_VISIBLE = 0x10;
+var SCREEN_NAME = 0x30;
+var SCREEN_TABS = 0x154;            // cUI_Inventory3's tab control
+var SCREEN_TABS_MAX = 3;
+var SCREEN_RECEIVE_SLOT = 4;        // cUI_Control2::receive_event in every window's vtable
+var SCREEN_INVENTORY = "UI_WND_INVENTORY";
+var SCREEN_TASKBAR = "UI_WND_TASKBAR";
+var SCREEN_USE_EVENT = 0x21;        // cEvent_object: the lid opens
+var SCREEN_TAKE_EVENT = 3;          // and, with [ev+0x10] = 1, the contents are taken
+var SCREEN_USE_SIZE = 0x48;
+// The one chest with a window (0x00428760): the hero's own, the same in every
+// town.  Every other chest and barrel answers the same message by dropping
+// what it holds, which a window must never do.
+var SCREEN_STASH_TYPE = 0x1450;
+var SCREEN_NPC_FLAGS = 0x200;       // creature flags 2: the roles the hero talks to
+
+// What each window a mod may move needs.  `from` is the sender the game's own
+// key writes, `open`/`close` a taskbar button the game sets beside it, `npc`
+// the role bit a creature needs and `setup` the id of the event that hands
+// the window its creature.
+var SCREEN_MOVES = {
+    "UI_WND_INVENTORY": { tabs: true },
+    "UI_WND_MEGAMAP": {},
+    "UI_WND_QUESTBOOK": { close: [SCREEN_HIDE, "UI_TB_BOOK"] },
+    "UI_WND_CONSOLE": { from: "<engineevent>" },
+    "UI_WND_ESCMENU": { flags: SCREEN_FLAG_ESC, from: "<WindowProc_engine>",
+                        open: [SCREEN_SHOW, "UI_TB_OPTIONS"] },
+    "UI_WND_MERCHANT": { npc: 0x2000, setup: 0x2E, role: "merchant" },
+    "UI_WND_BLACKSMITH": { npc: 0x1000, setup: 0x30, role: "blacksmith" },
+    "UI_WND_MASTER": { npc: 0x4000, setup: 0x2F, role: "combat master" },
+    "UI_WND_CHEST": { chest: true },
+    "UI_WND_CUBE": { flags: SCREEN_FLAG_ITEM }
+};
+
+var screenNative = null;
+
+function screenNatives() {
+    if (screenNative === null) {
+        screenNative = {
+            kernel: new NativeFunction(at(RVA.kernelInstance), "pointer", [], { abi: "mscdecl" }),
+            // A window may raise and handle its own exception while it opens.
+            send: new NativeFunction(at(RVA.kernelSend), "void",
+                                     ["pointer", "pointer", "int", "int"],
+                                     { abi: "thiscall", exceptions: "propagate" })
+        };
+    }
+    return screenNative;
+}
+
+function screenManager() {
+    var mgr = ptr(VA.uiManager).readPointer();
+    if (mgr.isNull()) {
+        throw new Error("The game has no windows yet.");
+    }
+    return mgr;
+}
+
+// The manager's windows by name.
+function screenWindows(mgr) {
+    var windows = {};
+    for (var off = SCREEN_WINDOWS_FIRST; off <= SCREEN_WINDOWS_LAST; off += 4) {
+        var w = mgr.add(off).readPointer();
+        if (!w.isNull()) {
+            var name = w.add(SCREEN_NAME).readCString();
+            if (name) {
+                windows[name] = w;
+            }
+        }
+    }
+    return windows;
+}
+
+function screenShowing(w) {
+    return w !== undefined && (w.add(SCREEN_VISIBLE).readU32() & 1) !== 0;
+}
+
+// The inventory's tab, 1..3 as its keys number them, or 0 while it is shut.
+function screenTab(windows) {
+    var inv = windows[SCREEN_INVENTORY];
+    if (!screenShowing(inv)) {
+        return 0;
+    }
+    var tabs = inv.add(SCREEN_TABS).readPointer();
+    if (tabs.isNull()) {
+        return 0;
+    }
+    var list = tabs.add(0x78).readPointer();
+    return list.isNull() ? 0 : list.add(0x84).readU16() + 1;
+}
+
+// Reported windows that are open, in the manager's order.
+function screenOpenNames(windows) {
+    var open = [];
+    for (var name in windows) {
+        if (screenReported(name) && screenShowing(windows[name])) {
+            open.push(name);
+        }
+    }
+    return open;
+}
+
+function screenZeroed(size) {
+    var ev = Memory.alloc(size);
+    for (var i = 0; i < size; i += 4) {
+        ev.add(i).writeU32(0);
+    }
+    return ev;
+}
+
+// A UI event as the game's keys build it (cEventUI2, see STRUCTURES).
+function screenEvent(id, to, flags, param, from) {
+    var ev = screenZeroed(SCREEN_EVENT_SIZE);
+    ev.writePointer(ptr(VA.eventUi2));
+    ev.add(4).writeU32(id);
+    ev.add(8).writeU32(flags);
+    ev.add(0xC).writeU32(param || 0);
+    if (from) {
+        ev.add(SCREEN_FROM).writeUtf8String(from.substring(0, SCREEN_TEXT_MAX));
+    }
+    ev.add(SCREEN_TO).writeUtf8String(to.substring(0, SCREEN_TEXT_MAX));
+    return ev;
+}
+
+function screenPost(ev) {
+    var n = screenNatives();
+    var kernel = n.kernel();
+    if (kernel.isNull()) {
+        throw new Error("The game has no event kernel.");
+    }
+    n.send(kernel, ev, 0, 0);
+}
+
+// A taskbar button's state goes straight to the taskbar, as the game sends it.
+function screenTaskbar(windows, button) {
+    var bar = windows[SCREEN_TASKBAR];
+    if (bar === undefined) {
+        return;
+    }
+    var receive = new NativeFunction(bar.readPointer().add(SCREEN_RECEIVE_SLOT * 4).readPointer(),
+                                     "uint8", ["pointer", "pointer"],
+                                     { abi: "thiscall", exceptions: "propagate" });
+    receive(bar, screenEvent(button[0], button[1], SCREEN_FLAG_TASKBAR, 0, null));
+}
+
+// The creature a merchant-like window is opened with, checked the way the
+// game checks it before it opens one: the role bit on the creature.
+function screenNpc(ref, move) {
+    var c = creatureFields(ref);
+    if (c === null) {
+        throw new Error("No creature at ref " + ref + ".");
+    }
+    var obj = objectByRef(ref);
+    if ((obj.add(SCREEN_NPC_FLAGS).readU32() & move.npc) === 0) {
+        throw new Error("The creature at ref " + ref + " is no " + move.role + ".");
+    }
+    return c;
+}
+
+function screenIsChest(ref) {
+    var obj = objectByRef(ref);
+    return obj !== null && obj.readPointer().equals(ptr(VA.chestVtable)) &&
+           obj.add(0x10).readU32() === SCREEN_STASH_TYPE;
+}
+
+// The hero's click on a chest, as the player makes it: two messages to it.
+function screenUse(ref, id, take) {
+    var ev = screenZeroed(SCREEN_USE_SIZE);
+    ev.writePointer(ptr(VA.objectEvent));
+    ev.add(4).writeU32(id);
+    ev.add(8).writeU32(heroFull.add(0x0C).readU32());
+    ev.add(0xC).writeU32(ref);
+    ev.add(0x10).writeU32(take ? 1 : 0);
+    screenPost(ev);
+}
+
+function screenOpen(windows, name, move, f) {
+    if (move.chest) {
+        screenUse(f.ref, SCREEN_USE_EVENT, false);
+        screenUse(f.ref, SCREEN_TAKE_EVENT, true);
+        return;
+    }
+    var flags = move.flags || SCREEN_FLAG_KEY;
+    if (move.npc) {
+        screenPost(screenEvent(SCREEN_SHOW, SCREEN_INVENTORY, SCREEN_FLAG_KEY, 0, null));
+        screenPost(screenEvent(SCREEN_SHOW, name, flags, 0, null));
+        var setup = screenEvent(move.setup, name, 8, f.level, null);
+        setup.add(0x10).writeU32(f.ref);
+        screenPost(setup);
+        return;
+    }
+    screenPost(screenEvent(SCREEN_SHOW, name, flags, f.tab, move.from));
+    if (move.open) {
+        screenTaskbar(windows, move.open);
+    }
+}
+
+function screenClose(windows, name, move) {
+    if (move.npc || move.chest) {
+        screenPost(screenEvent(SCREEN_HIDE, SCREEN_INVENTORY, SCREEN_FLAG_KEY, 0, null));
+        return;
+    }
+    screenPost(screenEvent(SCREEN_HIDE, name, move.flags || SCREEN_FLAG_KEY, 0, move.from));
+    if (move.close) {
+        screenTaskbar(windows, move.close);
+    }
+}
+
+// Reports what changed between two readings, as the onShow hook would have.
+function screenReport(before, windows) {
+    for (var name in windows) {
+        if (!screenReported(name)) {
+            continue;
+        }
+        var open = screenShowing(windows[name]);
+        if (open !== before[name]) {
+            screenVisible[name] = open;
+            evt(open ? "ui.shown" : "ui.hidden", screenFields(name, open));
+        }
+    }
+}
+
+function screenMove(name, how, f) {
+    var move = SCREEN_MOVES[name];
+    var windows = screenWindows(screenManager());
+    var before = {};
+    for (var w in windows) {
+        before[w] = screenShowing(windows[w]);
+    }
+    var showing = before[name] === true;
+    var tab = screenTab(windows);
+    var open;
+    if (how === "toggle") {
+        // The inventory's keys close it only from their own tab.
+        open = !showing || (move.tabs && f.tab !== 0 && f.tab !== tab);
+    } else {
+        open = how === "open";
+    }
+    if (open && (!showing || (move.tabs && f.tab !== 0 && f.tab !== tab))) {
+        screenOpen(windows, name, move, f);
+    } else if (!open && showing) {
+        screenClose(windows, name, move);
+    }
+    screenReport(before, windows);
+    return { window: name, open: screenShowing(windows[name]) ? 1 : 0, tab: screenTab(windows) };
+}
+
+// What a move needs, checked on Frida's thread so a wrong call fails at once.
+function screenRequest(f, how) {
+    var name = f.window === undefined ? "" : String(f.window);
+    var move = SCREEN_MOVES[name];
+    if (move === undefined) {
+        throw new Error("A mod cannot move the window " + name + ".");
+    }
+    if (!live(heroFull) || isLoading()) {
+        throw new Error("No world loaded.");
+    }
+    var request = { tab: 0, ref: 0, level: 0 };
+    if (f.tab !== undefined && f.tab !== "") {
+        request.tab = parseInt(f.tab, 10);
+        if (!move.tabs || isNaN(request.tab) || request.tab < 1 || request.tab > SCREEN_TABS_MAX) {
+            throw new Error("No tab " + f.tab + " on " + name + ".");
+        }
+    }
+    if (how === "open" && (move.npc || move.chest)) {
+        request.ref = parseInt(f.ref, 10);
+        if (isNaN(request.ref) || request.ref <= 0) {
+            throw new Error(name + " opens with the ref of its " +
+                            (move.chest ? "chest" : move.role) + ".");
+        }
+        if (move.chest && !screenIsChest(request.ref)) {
+            throw new Error("No hero chest at ref " + f.ref + ".");
+        }
+        if (move.npc) {
+            request.level = screenNpc(request.ref, move).level;
+        }
+    } else if (how === "toggle" && (move.npc || move.chest)) {
+        throw new Error(name + " opens only with a ref.");
+    }
+    return request;
+}
+
+function screenCommand(how) {
+    commandOnEngine("ui." + how, function (f) {
+        var request = screenRequest(f, how);
+        var name = String(f.window);
+        var move = SCREEN_MOVES[name];
+        return function () {
+            if (!live(heroFull)) {
+                throw new Error("No world loaded.");
+            }
+            // A creature or chest the ref named may be gone by now.
+            if (request.ref && move.chest && !screenIsChest(request.ref)) {
+                throw new Error("No hero chest at ref " + request.ref + ".");
+            }
+            if (request.ref && move.npc) {
+                screenNpc(request.ref, move);
+            }
+            return screenMove(name, how, request);
+        };
+    });
+}
+
+screenCommand("open");
+screenCommand("close");
+screenCommand("toggle");
+
+command("ui.windows", function () {
+    var mgr = ptr(VA.uiManager).readPointer();
+    if (mgr.isNull()) {
+        return { open: "", tab: 0 };
+    }
+    var windows = screenWindows(mgr);
+    return { open: screenOpenNames(windows).join(","), tab: screenTab(windows) };
+});
