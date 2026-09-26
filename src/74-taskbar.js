@@ -228,6 +228,21 @@ function taskWindow() {
     return taskWindowPtr;
 }
 
+// The level the hero has in an art, base and gear bonus, for the slot to show;
+// 1 when the hero lacks it or the arts module is not loaded.
+function taskArtLevel(id) {
+    var span = typeof heroArtSpan === "function" ? heroArtSpan() : null;
+    if (span === null) {
+        return 1;
+    }
+    for (var rec = span[0]; rec.compare(span[1]) < 0; rec = rec.add(ART_SIZE)) {
+        if (rec.add(4).readU16() === id) {
+            return Math.max(1, Math.min(0xFF, rec.add(6).readU8() + rec.add(7).readU8()));
+        }
+    }
+    return 1;
+}
+
 function taskBagOrThrow() {
     var bag = taskBag();
     if (bag === null || isLoading()) {
@@ -275,7 +290,7 @@ command("player.taskbar_art", function (f) {
         var data = Memory.alloc(0x20);
         if (kind === "art") {
             data.writeU32(id);
-            data.add(4).writeU32(isNaN(level) ? 1 : Math.max(1, Math.min(0xFF, level)));
+            data.add(4).writeU32(isNaN(level) ? taskArtLevel(id) : Math.max(1, Math.min(0xFF, level)));
             fns.setArt(bag, slot, id >= 1000 ? TASK_MOVE : TASK_SPELL, 0, data);
         } else if (kind === "combo") {
             var packed = Memory.alloc(0x20);
