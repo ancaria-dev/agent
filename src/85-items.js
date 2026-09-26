@@ -227,9 +227,15 @@ function reshape(ref, changes) {
     var wrote = false;
     // "The type" is both copies.  Writing one and not the other is what made
     // the first attempt a reskin, so a caller never gets to do that by
-    // accident.  There is one `type` field and it means both.
-    if (changes.type !== undefined) {
-        var typeId = parseInt(changes.type, 10);
+    // accident.  There is one `type` field and it means both.  A mod that
+    // names the type rather than numbering it sends `typeName`, the game's
+    // internal name; an unknown name changes nothing.
+    var newType = changes.type;
+    if (newType === undefined && changes.typeName !== undefined) {
+        newType = typeIds()[changes.typeName];
+    }
+    if (newType !== undefined) {
+        var typeId = parseInt(newType, 10);
         if (!isNaN(typeId)) {
             try {
                 obj.add(ITEM.type).writeU32(typeId >>> 0);
