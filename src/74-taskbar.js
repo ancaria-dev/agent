@@ -138,12 +138,31 @@ function taskArtRecord(bag, slot, form) {
     return "0:0:0:";
 }
 
-function taskState(bag) {
+// An item's fields under a prefix, "w<slot><hand>.", the way item.info gives
+// them.  The items module owns them; without it the refs and types still come.
+function taskItemInto(out, prefix, ref) {
+    if (ref === 0 || typeof itemFields !== "function") {
+        return;
+    }
+    var fields = itemFields(ref);
+    for (var key in fields) {
+        if (fields[key] !== undefined) {
+            out[prefix + key] = fields[key];
+        }
+    }
+}
+
+function taskState(bag, withItems) {
     var weapons = [];
+    var items = {};
     for (var i = 0; i < TASK_SLOTS; i++) {
         var off = bag.add(TASK_WEAPONS + i * 2 * TASK_WEAPON_HAND).readU32() >>> 0;
         var main = bag.add(TASK_WEAPONS + (i * 2 + 1) * TASK_WEAPON_HAND).readU32() >>> 0;
         weapons.push([i, off, taskItemType(off), main, taskItemType(main)].join(":"));
+        if (withItems) {
+            taskItemInto(items, "w" + i + "0.", off);
+            taskItemInto(items, "w" + i + "1.", main);
+        }
     }
     var arts = [];
     for (var s = 0; s < TASK_SLOTS; s++) {
@@ -151,7 +170,7 @@ function taskState(bag) {
             arts.push(s + ":" + f + ":" + taskArtRecord(bag, s, f));
         }
     }
-    return {
+    var state = {
         open: taskOpenSlots(),
         unlock: taskUnlockLevels().join(","),
         form: (bag.add(TASK_BAG_FLAGS).readU16() & TASK_VAMPIRE) ? 1 : 0,
@@ -160,6 +179,10 @@ function taskState(bag) {
         weapons: weapons.join(";"),
         arts: arts.join(";")
     };
+    for (var key in items) {
+        state[key] = items[key];
+    }
+    return state;
 }
 
 // The taskbar window, cUI_Taskbar2.  Nothing global points at it, so it is
@@ -222,7 +245,7 @@ function taskSlotArg(raw) {
 }
 
 command("player.taskbar", function () {
-    return taskState(taskBagOrThrow());
+    return taskState(taskBagOrThrow(), true);
 });
 
 // What an art slot holds in the hero's current form, through the game's own
@@ -382,7 +405,7 @@ onTickEvery(500, function () {
     }
     var now;
     try {
-        now = taskState(bag);
+        now = taskState(bag, false);
     } catch (e) {
         return;
     }
@@ -411,8 +434,11 @@ onTickEvery(500, function () {
         if (wa[w] !== wb[w]) {
             var p = wa[w].split(":");
             var n = wb[w].split(":");
-            evt("taskbar.weapon_changed", { slot: w, prevOff: p[1], prevMain: p[3],
-                                            off: n[1], offType: n[2], main: n[3], mainType: n[4] });
+            var fields = { slot: w, prevOff: p[1], prevMain: p[3],
+                           off: n[1], offType: n[2], main: n[3], mainType: n[4] };
+            taskItemInto(fields, "w" + w + "0.", parseInt(n[1], 10));
+            taskItemInto(fields, "w" + w + "1.", parseInt(n[3], 10));
+            evt("taskbar.weapon_changed", fields);
         }
     }
     if (now.weapon !== before.weapon) {
