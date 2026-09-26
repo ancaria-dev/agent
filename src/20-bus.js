@@ -66,6 +66,42 @@ function command(name, fn) {
     commands[name] = fn;
 }
 
+// A command whose answer comes from the engine thread, for a caller that
+// needs what a game call returned: the ref of a creature the game just made.
+// `prepare` runs at once on Frida's thread, checks the fields and throws what
+// is wrong with them, and returns the work.  The work runs on a later tick
+// through later(), and what it returns, or the error it throws, is the reply.
+// Frida's thread never waits for the tick: the reply simply leaves later,
+// and the host routes it by its sequence number like any other.  Coderpack
+// waits two seconds for it; a reply that comes after that is dropped there,
+// and nothing runs while a world loads.
+var COMMAND_LATER = {};
+
+function commandLater(name, prepare) {
+    commands[name] = function (f, seq) {
+        var work = prepare(f);
+        if (!later(function () {
+            var out;
+            try {
+                out = work() || {};
+            } catch (e) {
+                out = { err: e.message };
+            }
+            reply(seq, name, out);
+        })) {
+            throw new Error("Too many game calls waiting.");
+        }
+        return COMMAND_LATER;
+    };
+}
+
+function reply(seq, name, out) {
+    if (out.err === undefined) {
+        out.ok = true;
+    }
+    send({ type: "res", id: seq, result: name, returns: out });
+}
+
 function armCommands() {
     recv("cmd", function (msg) {
         // Flat, because the wire is flat.  This used to send { ok, f: {...} }
@@ -78,14 +114,13 @@ function armCommands() {
             var fn = commands[msg.name];
             out = (fn === undefined)
                 ? { err: "unknown command: " + msg.name }
-                : (fn(msg.f || {}) || {});
+                : (fn(msg.f || {}, msg.seq) || {});
         } catch (e) {
             out = { err: e.message };
         }
-        if (out.err === undefined) {
-            out.ok = true;
+        if (out !== COMMAND_LATER) {
+            reply(msg.seq, msg.name, out);
         }
-        send({ type: "res", id: msg.seq, result: msg.name, returns: out });
         armCommands();
     });
 }
