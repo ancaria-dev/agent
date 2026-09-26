@@ -327,6 +327,9 @@ command("item.modtext", function (f) {
 // `type` off a Pickup writes `type` back here.
 command("item.reshape", function (f) {
     var ref = parseInt(f.ref, 10);
+    if (f.type === undefined && f.typeName !== undefined && typeIds()[f.typeName] === undefined) {
+        throw new Error("No item type " + f.typeName + ".");
+    }
     if (!reshape(ref, f)) {
         throw new Error("No item found at ref " + f.ref + ".");
     }
