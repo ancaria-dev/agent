@@ -95,6 +95,40 @@ function commandLater(name, prepare) {
     };
 }
 
+// The same, for work the game does only on its engine thread, the one that
+// handles the player's keys and clicks: moving a window, a message to a chest.
+// cUI_Manager::handleEsc logs when another thread calls it.  The tick runs on
+// more than one thread, so these jobs wait in their own queue until the tick
+// runs on the thread the engine names at VA.engineThread.
+var ENGINE_JOBS_MAX = 8;
+var engineJobs = [];
+
+function commandOnEngine(name, prepare) {
+    commands[name] = function (f, seq) {
+        var work = prepare(f);
+        if (engineJobs.length >= ENGINE_JOBS_MAX) {
+            throw new Error("Too many game calls waiting.");
+        }
+        engineJobs.push({ seq: seq, name: name, work: work });
+        return COMMAND_LATER;
+    };
+}
+
+onTick(function () {
+    if (engineJobs.length === 0 || isLoading() ||
+            Process.getCurrentThreadId() !== ptr(VA.engineThread).readU32()) {
+        return;
+    }
+    var job = engineJobs.shift();
+    var out;
+    try {
+        out = job.work() || {};
+    } catch (e) {
+        out = { err: e.message };
+    }
+    reply(job.seq, job.name, out);
+});
+
 function reply(seq, name, out) {
     if (out.err === undefined) {
         out.ok = true;
