@@ -137,3 +137,45 @@ command("player.art", function (f) {
     return { index: index, id: art.id, aspect: art.aspect,
              level: art.level, bonus: art.bonus };
 });
+
+// The hero starts a combat art.  The action event (0x105) the taskbar or a
+// mod sends is copied into the hero when it is taken up: the action word
+// +0xFC becomes 6 (11 for one variant), the target's ref lands at +0x100,
+// its sector and position at +0x104..+0x10C, the global art id at +0x120.
+// Hooking the receive_event that does it would cost a callback on every
+// creature's event, hundreds a second, so the word is read on every tick
+// instead: one read, and an art stays in that state for a good part of a
+// second.  It reports what the hero took up, not whether it landed.
+var ART_ACTION = 0xFC;
+var ART_ACTION_ART = [6, 11];
+var ART_ACTION_FIELDS = { target: 0x100, sector: 0x104, x: 0x108, y: 0x10C, id: 0x120 };
+var artActionLast = 0;
+
+onTick(function () {
+    if (!live(heroFull)) {
+        artActionLast = 0;
+        return;
+    }
+    var action;
+    try {
+        action = heroFull.add(ART_ACTION).readU16();
+    } catch (e) {
+        return;
+    }
+    if (action === artActionLast) {
+        return;
+    }
+    artActionLast = action;
+    if (ART_ACTION_ART.indexOf(action) < 0 || isLoading()) {
+        return;
+    }
+    try {
+        evt("art.used", {
+            id: heroFull.add(ART_ACTION_FIELDS.id).readU32(),
+            target: heroFull.add(ART_ACTION_FIELDS.target).readU32(),
+            sector: heroFull.add(ART_ACTION_FIELDS.sector).readU16(),
+            x: heroFull.add(ART_ACTION_FIELDS.x).readS32(),
+            y: heroFull.add(ART_ACTION_FIELDS.y).readS32()
+        });
+    } catch (e) {}
+});
