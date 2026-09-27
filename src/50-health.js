@@ -7,8 +7,8 @@
 // a return address and an onLeave would make Frida track a bogus return site.
 //
 // Cold enough to ask on: a counter-only probe measured 34 executions in 22s of
-// real combat, peak 5/s, 7 of them the player.  The regen writer touches the
-// same field ~10 times a second per creature and is deliberately not hooked.
+// real combat, peak 5/s, 7 of them the player.  Regeneration is reported at the
+// end of this file, never asked about.
 
 var HP_CUR = 0x130;
 var HP_MAX = 0x12C;
@@ -149,5 +149,49 @@ hook("maxHpCommit", RVA.commitStats, {
                 lastMaxHp = maxHp;
             }
         } catch (e) {}
+    }
+});
+
+// Regeneration.  The write (+0x162D10) is not a site: EDX and ECX are loaded
+// just before it and compared just after, the shape that has failed three
+// times.  It lives inside the regeneration tick, a thiscall on the sheet whose
+// entry is the same `mov eax, fs:[0]` prologue AddGold's entry hook relocates,
+// so the hook sits there and compares HP around the call.
+//
+// The tick runs for every creature about ten times a second.  Only the hero's
+// change is reported, as a plain event: asking would stop the game thread ten
+// times a second for a number nobody needs to decide.
+hook("regenTick", RVA.regenTick, {
+    onEnter: function () {
+        var sheet = this.context.ecx;
+        if (!isHeroSheet(sheet)) {
+            return;
+        }
+        try {
+            this.hp = sheet.add(HP_CUR).readU32() >>> 0;
+        } catch (e) {
+            return;
+        }
+        this.sheet = snapPtr(sheet);
+    },
+    onLeave: function () {
+        if (!this.sheet) {
+            return;
+        }
+        var next, maxHp;
+        try {
+            next = this.sheet.add(HP_CUR).readU32() >>> 0;
+            maxHp = this.sheet.add(HP_MAX).readU32() >>> 0;
+        } catch (e) {
+            return;
+        }
+        if (next === this.hp) {
+            return;
+        }
+        // Down only when a smaller maximum clamped it.
+        evt("health.changed", {
+            kind: next > this.hp ? "regen" : "clamp", damage: 0,
+            prev: this.hp, next: next, max: maxHp
+        });
     }
 });

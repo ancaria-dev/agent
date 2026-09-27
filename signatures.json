@@ -43,6 +43,7 @@
     "potionDrink": "e855db270099b903",
     "questEnd": "6aff6802df850064",
     "questStart": "81ec14020000a0bc",
+    "regenTick": "64a1000000006aff",
     "regionEnter": "81ec180100005355",
     "regionExit": "81ec100200005355",
     "resurrect": "8b81f4560000c781",
