@@ -137,3 +137,9 @@ onSample(SAMPLE_FREQUENT, ["gold.changed"], function () {
         lastGold = now;
     }
 });
+
+// Another character's gold is its starting point, reported with delta 0, not a
+// gain or loss measured against the hero before it.
+onHero(function () {
+    lastGold = -1;
+});
