@@ -12,7 +12,8 @@
 // videos'.  Nothing is sent per frame.  The rest is sampled once a second on
 // Frida's own thread, where reading memory is safe:
 //
-//   "engine.frames"          every second while frames come: the rate
+//   "engine.frames"          four times a second while frames come: the rate
+//                            over the last second
 //                            and the count so far
 //   "engine.display"         the back buffer's size, depth or mode changed
 //   "engine.device_lost"     flip failed; "engine.device_restored" when it
@@ -34,7 +35,7 @@ var NATIVE_D3D = 0xC8;
 var NATIVE_DEVICE = 0xCC;
 var NATIVE_MENU_THREAD = 0x0C;      // [uiManager+0x0C], the menu thread's handle
 var NATIVE_STILL_ACTIVE = 259;
-var NATIVE_REPORT_MS = 1000;
+var NATIVE_REPORT_MS = 250;
 
 var nativeFrames = 0;
 var nativeLost = false;
@@ -117,25 +118,28 @@ function nativeDisplay() {
 var nativeLastThreads = null;
 var nativeLastDisplay = null;
 var nativeFps = 0;
-var nativeSampledFrames = 0;
-var nativeSampledAt = Date.now();
-var nativeReportedAt = Date.now();
+// (time, frames) every quarter second, the last second of them: the rate
+// is taken over a second and reported four times in it.
+var nativeSamples = [];
 
 function nativeSample() {
     var now = Date.now();
     var frames = nativeFrames;
-    if (now > nativeSampledAt) {
-        nativeFps = Math.round((frames - nativeSampledFrames) * 10000 / (now - nativeSampledAt)) / 10;
+    nativeSamples.push([now, frames]);
+    while (nativeSamples.length > 1 && now - nativeSamples[0][0] > 1000) {
+        nativeSamples.shift();
     }
-    nativeSampledFrames = frames;
-    nativeSampledAt = now;
-    if (now - nativeReportedAt >= NATIVE_REPORT_MS) {
-        nativeReportedAt = now;
-        if (nativeFps > 0) {
-            evt("engine.frames", { fps: nativeFps, frames: frames });
-        }
+    var first = nativeSamples[0];
+    if (now > first[0]) {
+        nativeFps = Math.round((frames - first[1]) * 10000 / (now - first[0])) / 10;
     }
+    if (frames !== first[1]) {
+        evt("engine.frames", { fps: nativeFps, frames: frames });
+    }
+}
 
+// The display and the threads, once a second.
+function nativeSlow() {
     var display = nativeDisplay();
     if (display !== null) {
         var shown = JSON.stringify(display);
@@ -164,11 +168,17 @@ function nativeSample() {
     nativeLastThreads = threads;
 }
 
+var nativeTicks = 0;
+
 setInterval(function () {
     try {
         nativeSample();
+        nativeTicks += 1;
+        if (nativeTicks % 4 === 0) {
+            nativeSlow();
+        }
     } catch (e) {}
-}, 1000);
+}, NATIVE_REPORT_MS);
 
 command("native.info", function () {
     var n = nativeNatives();
