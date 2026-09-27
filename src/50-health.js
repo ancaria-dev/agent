@@ -42,9 +42,6 @@ function entityHp(sheet, next, kind, damage) {
     }
 }
 
-// The last hero HP a "health.changed" carried, or -1 before the first.
-var hpReported = -1;
-
 function attachHp(name, rva, opts) {
     hook(name, rva, function () {
         var ctx = this.context;
@@ -107,7 +104,6 @@ function attachHp(name, rva, opts) {
             kind: kind, damage: damage,
             prev: prev, next: committed, max: maxHp
         });
-        hpReported = committed;
         entityHp(sheet, committed, kind, damage);
 
         if (committed <= 0 && prev > 0) {
@@ -154,39 +150,4 @@ hook("maxHpCommit", RVA.commitStats, {
             }
         } catch (e) {}
     }
-});
-
-// Every write the hooks above do not see: regeneration, resurrection, a
-// potion's effect over time, poison.  Hooking the regen writer is out (ten
-// writes a second per creature), so the tick compares the field with the last
-// value reported and closes the gap, at most four times a second.  Without it
-// a HUD kept showing the dead hero's HP after the hero came back.
-onTickEvery(250, function () {
-    if (isLoading() || !live(heroSheet)) {
-        return;
-    }
-    var now, maxHp;
-    try {
-        now = heroSheet.add(HP_CUR).readU32() >>> 0;
-        maxHp = heroSheet.add(HP_MAX).readU32() >>> 0;
-    } catch (e) {
-        return;
-    }
-    // The first reading is where the hero already was, not a change.
-    if (hpReported < 0) {
-        hpReported = now;
-        return;
-    }
-    if (now === hpReported) {
-        return;
-    }
-    evt("health.changed", {
-        kind: now > hpReported ? "regen" : "drain", damage: 0,
-        prev: hpReported, next: now, max: maxHp
-    });
-    hpReported = now;
-});
-
-onHero(function () {
-    hpReported = -1;
 });
