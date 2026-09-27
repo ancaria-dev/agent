@@ -607,6 +607,37 @@ hook("chestDrop", RVA.chestDrop, {
     }
 });
 
+// A chest or barrel opening, once: the branch of its receive_event that drops
+// the contents and then marks it used (see the chestOpen row).  The hero's own
+// chest takes the window branch instead and is reported as a screen.  Empty
+// chests pass here too, which dropItems never sees.
+var chestOpened = 0;
+
+function containerOpenFields(chest, opener, refs) {
+    var type = chest.add(0x10).readU32() >>> 0;
+    return {
+        ref: objectRef(chest), type: type, name: typeName(type) || "",
+        x: chest.add(0x1C).readS32(), y: chest.add(0x20).readS32(),
+        sector: chest.add(0x18).readU16(), opener: opener,
+        items: lootItems(refs).join(";")
+    };
+}
+
+hook("chestOpen", RVA.chestOpen, function () {
+    chestOpened += 1;
+    if (isLoading()) {
+        return;
+    }
+    try {
+        var chest = this.context.esi;
+        if ((chest.add(0x14).readU32() & CONTAINER_USED) !== 0) {
+            return;
+        }
+        var opener = this.context.ebx.add(8).readU32() >>> 0;
+        evt("container.open", containerOpenFields(chest, opener, chestRefs(chest)));
+    } catch (e) {}
+});
+
 // Opening a chest or a barrel, the way the hero's click does it (traced live
 // on the user's click, see the takeScript row):
 //
@@ -754,14 +785,18 @@ commandOnEngine("world.open", function (f) {
         var mode = containerTakeMode(obj);
         var refs = chestRefs(obj);
         var dropped = chestDropped;
+        var opened = chestOpened;
         if (mode !== 0) {
             var receive = new NativeFunction(
                 obj.readPointer().add(CONTAINER_RECEIVE_SLOT * 4).readPointer(),
                 "uint8", ["pointer", "pointer"], { abi: "thiscall", exceptions: "propagate" });
             receive(obj, containerMessage(ref, CONTAINER_TAKE, mode));
         }
-        // The chestDrop hook does not see a call made from the tick, so the
-        // drop it would have reported is reported here.
+        // The chestOpen and chestDrop hooks do not see a call made from the
+        // tick, so what they would have reported is reported here.
+        if (chestOpened === opened && (obj.add(0x14).readU32() & CONTAINER_USED) !== 0) {
+            evt("container.open", containerOpenFields(obj, heroFull.add(0x0C).readU32() >>> 0, refs));
+        }
         var out = chestLootFields(obj, mode === 1 ? refs : []);
         if (mode === 1 && refs.length > 0 && chestDropped === dropped) {
             evt("loot.drop", out);
