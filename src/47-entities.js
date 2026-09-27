@@ -576,22 +576,199 @@ hook("lootDrop", RVA.lootDrop, {
     }
 });
 
+// A chest's contents: the vector of refs it drops.
+function chestRefs(chest) {
+    var begin = chest.add(0x1E4).readPointer();
+    var end = chest.add(0x1E8).readPointer();
+    var refs = [];
+    for (var p = begin; !begin.isNull() && p.compare(end) < 0; p = p.add(4)) {
+        refs.push(p.readU32() >>> 0);
+    }
+    return refs;
+}
+
+function chestLootFields(chest, refs) {
+    var type = chest.add(0x10).readU32() >>> 0;
+    return {
+        source: objectRef(chest), type: type, name: typeName(type) || "",
+        chest: 1, items: lootItems(refs).join(";")
+    };
+}
+
+var chestDropped = 0;
+
 hook("chestDrop", RVA.chestDrop, {
     onEnter: function () {
+        chestDropped += 1;
         try {
             var chest = this.context.ecx;
-            var begin = chest.add(0x1E4).readPointer();
-            var end = chest.add(0x1E8).readPointer();
-            var refs = [];
-            for (var p = begin; !begin.isNull() && p.compare(end) < 0; p = p.add(4)) {
-                refs.push(p.readU32() >>> 0);
-            }
-            var items = lootItems(refs);
-            var type = chest.add(0x10).readU32() >>> 0;
-            evt("loot.drop", {
-                source: objectRef(chest), type: type, name: typeName(type) || "",
-                chest: 1, items: items.join(";")
-            });
+            evt("loot.drop", chestLootFields(chest, chestRefs(chest)));
         } catch (e) {}
     }
+});
+
+// Opening a chest or a barrel, the way the hero's click does it (traced live
+// on the user's click, see the takeScript row):
+//
+//   1. the object's quest script, cInterpretSQW::useObject(hero, ref, 3, 0);
+//   2. cEvent_object 0x21 through the kernel: the lid lifts;
+//   3. the fill script: the interpreter turns the key "Take:" into
+//      "Take:<script>", and fillScript runs that script into the chest, which
+//      makes the loot and hands it to the chest;
+//   4. id 3 straight to the chest's receive_event, "take" 1 when the chest's
+//      sector record allows it (2, a refusal, otherwise): the loot drops.
+//
+// Skipping step 3 opens a chest empty and marks it used, which a save keeps:
+// its loot is gone for good.  The hero's own chest answers step 4 with its
+// window instead, so it is refused here (the screens module opens it).
+var CONTAINER_LID = 0x21;
+var CONTAINER_TAKE = 3;
+var CONTAINER_EVENT_SIZE = 0x48;
+var CONTAINER_USED = 0x4000;        // object flags +0x14
+var CONTAINER_HERO_CHEST = 0x1450;
+var CONTAINER_FAMILY = 4;           // chests and barrels
+var CONTAINER_HOW = 3;              // what the click passes useObject
+var CONTAINER_KEY = "Take:";
+var CONTAINER_SECTOR = 0x34;        // index into the world's sector records
+var CONTAINER_RECEIVE_SLOT = 6;
+var containerNative = null;
+
+function containerNatives() {
+    if (containerNative === null) {
+        var opts = { abi: "thiscall", exceptions: "propagate" };
+        containerNative = {
+            kernel: new NativeFunction(at(RVA.kernelInstance), "pointer", [], { abi: "mscdecl" }),
+            send: new NativeFunction(at(RVA.kernelSend), "void",
+                                     ["pointer", "pointer", "int", "int"], opts),
+            use: new NativeFunction(at(RVA.scriptUse), "void",
+                                    ["pointer", "pointer", "int", "int", "int"], opts),
+            assign: new NativeFunction(at(RVA.stringAssign), "void",
+                                       ["pointer", "pointer", "pointer"], opts),
+            take: new NativeFunction(at(RVA.takeScript), "uint8", ["pointer", "int", "pointer"], opts),
+            fill: new NativeFunction(at(RVA.fillScript), "void", ["pointer", "pointer", "int"],
+                                     { abi: "mscdecl", exceptions: "propagate" }),
+            free: new NativeFunction(at(RVA.gameFree), "void", ["pointer", "uint32"],
+                                     { abi: "stdcall", exceptions: "propagate" }),
+            key: Memory.allocAnsiString(CONTAINER_KEY)
+        };
+    }
+    return containerNative;
+}
+
+function containerMessage(ref, id, take) {
+    var ev = Memory.alloc(CONTAINER_EVENT_SIZE);
+    for (var i = 0; i < CONTAINER_EVENT_SIZE; i += 4) {
+        ev.add(i).writeU32(0);
+    }
+    ev.writePointer(ptr(VA.objectEvent));
+    ev.add(4).writeU32(id);
+    ev.add(8).writeU32(heroFull.add(0x0C).readU32());
+    ev.add(0xC).writeU32(ref);
+    ev.add(0x10).writeU32(take);
+    return ev;
+}
+
+// Step 3: the fill script, through a key string the game owns.  Answers the
+// script's name, or null when the chest has none.
+function containerFill(n, ref, obj) {
+    var key = Memory.alloc(12);
+    key.writeU32(0);
+    key.add(4).writeU32(0);
+    key.add(8).writeU32(0);
+    n.assign(key, n.key, n.key.add(CONTAINER_KEY.length));
+    try {
+        if (n.take(ptr(VA.scriptInterpreter), ref, key) === 0) {
+            return null;
+        }
+        var text = key.readPointer().readCString();
+        if (text === null || text.indexOf(CONTAINER_KEY) !== 0) {
+            return null;
+        }
+        n.fill(key.readPointer().add(CONTAINER_KEY.length), obj, 0);
+        return text.substring(CONTAINER_KEY.length);
+    } finally {
+        var begin = key.readPointer();
+        if (!begin.isNull()) {
+            n.free(begin, key.add(8).readPointer().sub(begin).toUInt32());
+        }
+    }
+}
+
+// Step 4: 1 lets the loot drop, 2 refuses, 0 sends nothing.
+function containerTakeMode(obj) {
+    var index = obj.add(CONTAINER_SECTOR).readU32();
+    if (index === 0) {
+        return 0;
+    }
+    var world = ptr(VA.objectManager).readPointer().readPointer();
+    var begin = world.add(0x268).readPointer();
+    var count = world.add(0x26C).readPointer().sub(begin).toInt32() >> 4;
+    if (index >= count) {
+        return 0;
+    }
+    return (begin.add(index * 16 + 0xA).readU8() & 1) !== 0 ? 1 : 2;
+}
+
+// The container at a ref, or an error saying why it cannot be opened.
+function containerAt(ref) {
+    var obj = objectByRef(ref);
+    if (obj === null || !obj.readPointer().equals(ptr(VA.chestVtable))) {
+        throw new Error("No chest or barrel at ref " + ref + ".");
+    }
+    var type = obj.add(0x10).readU32() >>> 0;
+    if (type === CONTAINER_HERO_CHEST) {
+        throw new Error("The hero's chest opens as a window, not onto the ground.");
+    }
+    if (objectFamily(type) !== CONTAINER_FAMILY) {
+        throw new Error("No chest or barrel at ref " + ref + ".");
+    }
+    if ((obj.add(0x14).readU32() & CONTAINER_USED) !== 0) {
+        throw new Error("The chest at ref " + ref + " is already open.");
+    }
+    return { obj: obj, type: type };
+}
+
+commandOnEngine("world.open", function (f) {
+    var ref = parseInt(f.ref, 10);
+    if (isNaN(ref) || ref <= 0) {
+        throw new Error("world.open needs the ref of a chest or barrel.");
+    }
+    if (!live(heroFull) || isLoading()) {
+        throw new Error("No world loaded.");
+    }
+    var before = containerAt(ref);
+    return function () {
+        var now = containerAt(ref);
+        if (now.type !== before.type) {
+            throw new Error("The chest at ref " + ref + " is gone.");
+        }
+        var n = containerNatives();
+        var obj = now.obj;
+        var kernel = n.kernel();
+        if (kernel.isNull()) {
+            throw new Error("The game has no event kernel.");
+        }
+        n.use(ptr(VA.scriptInterpreter), heroFull, ref, CONTAINER_HOW, 0);
+        n.send(kernel, containerMessage(ref, CONTAINER_LID, 0), 0, 0);
+        var script = containerFill(n, ref, obj);
+        var mode = containerTakeMode(obj);
+        var refs = chestRefs(obj);
+        var dropped = chestDropped;
+        if (mode !== 0) {
+            var receive = new NativeFunction(
+                obj.readPointer().add(CONTAINER_RECEIVE_SLOT * 4).readPointer(),
+                "uint8", ["pointer", "pointer"], { abi: "thiscall", exceptions: "propagate" });
+            receive(obj, containerMessage(ref, CONTAINER_TAKE, mode));
+        }
+        // The chestDrop hook does not see a call made from the tick, so the
+        // drop it would have reported is reported here.
+        var out = chestLootFields(obj, mode === 1 ? refs : []);
+        if (mode === 1 && refs.length > 0 && chestDropped === dropped) {
+            evt("loot.drop", out);
+        }
+        out.ref = ref;
+        out.script = script || "";
+        out.dropped = mode === 1 ? 1 : 0;
+        return out;
+    };
 });
