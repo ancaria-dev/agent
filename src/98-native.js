@@ -12,7 +12,7 @@
 // videos'.  Nothing is sent per frame.  The rest is sampled once a second on
 // Frida's own thread, where reading memory is safe:
 //
-//   "engine.frames"          four times a second while frames come: the rate
+//   "engine.frames"          ten times a second while frames come: the rate
 //                            over the last second
 //                            and the count so far
 //   "engine.display"         the back buffer's size, depth or mode changed
@@ -35,7 +35,8 @@ var NATIVE_D3D = 0xC8;
 var NATIVE_DEVICE = 0xCC;
 var NATIVE_MENU_THREAD = 0x0C;      // [uiManager+0x0C], the menu thread's handle
 var NATIVE_STILL_ACTIVE = 259;
-var NATIVE_REPORT_MS = 250;
+var NATIVE_REPORT_MS = 100;
+var NATIVE_SLOW_EVERY = 1000 / NATIVE_REPORT_MS;
 
 var nativeFrames = 0;
 var nativeLost = false;
@@ -118,8 +119,8 @@ function nativeDisplay() {
 var nativeLastThreads = null;
 var nativeLastDisplay = null;
 var nativeFps = 0;
-// (time, frames) every quarter second, the last second of them: the rate
-// is taken over a second and reported four times in it.
+// (time, frames) every tenth of a second, the last second of them: the rate
+// is taken over a second and reported ten times in it.
 var nativeSamples = [];
 
 function nativeSample() {
@@ -174,7 +175,7 @@ setInterval(function () {
     try {
         nativeSample();
         nativeTicks += 1;
-        if (nativeTicks % 4 === 0) {
+        if (nativeTicks % NATIVE_SLOW_EVERY === 0) {
             nativeSlow();
         }
     } catch (e) {}
