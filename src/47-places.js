@@ -6,6 +6,7 @@
 //
 //   world.spots        every visible spot, packed
 //   world.spot_open    a hiding place, opened the way the hero's click does
+//   spot.open          event: the hero or world.spot_open used a spot
 //
 // Opening, as traced live on the user's click: the record's script runs with
 // the hero (fillScript "VERSTECK", which makes the item beside the hero), the
@@ -130,6 +131,52 @@ function spotObjectTable() {
     return slots;
 }
 
+// The hero using a spot: the game runs its script by the name inside the
+// record (see the fillScript row), so a name pointer into the spots vector
+// tells a spot from a chest's fill.  What the script makes is collected by
+// objCreate, and this hook is switched with it, off while a world loads.  The
+// record's uses go down only after the script returns, so the uses sent are
+// the ones left once the game has counted this use.
+function spotOpenFields(spot, made) {
+    var uses = spot.uses < SPOT_ENDLESS ? Math.max(spot.uses - 1, 0) : spot.uses;
+    return {
+        index: spot.index, gx: spot.gx, gy: spot.gy,
+        x: spotWorld(spot.gx), y: spotWorld(spot.gy),
+        uses: uses, name: spot.name, items: spotItems(made).join(";")
+    };
+}
+
+spawnFollowers.push(switchable("fillScript", RVA.fillScript, {
+    onEnter: function (args) {
+        this.spot = null;
+        try {
+            var records = spotRecords();
+            var offset = args[0].sub(records.begin).toInt32();
+            if (records.count === 0 || offset < 0 || offset >= records.count * SPOT_SIZE ||
+                    offset % SPOT_SIZE !== SPOT_NAME) {
+                return;
+            }
+            var spot = spotAt(records, Math.floor(offset / SPOT_SIZE));
+            if (spot.name === "" || SPOT_HIDDEN.test(spot.name)) {
+                return;
+            }
+            this.spot = spot;
+            this.outer = lootDropping;
+            lootDropping = [];
+        } catch (e) {}
+    },
+    onLeave: function () {
+        if (this.spot === null) {
+            return;
+        }
+        var made = lootDropping || [];
+        lootDropping = this.outer;
+        try {
+            evt("spot.open", spotOpenFields(this.spot, made));
+        } catch (e) {}
+    }
+}));
+
 commandOnEngine("world.spot_open", function (f) {
     var gx = parseInt(f.gx, 10);
     var gy = parseInt(f.gy, 10);
@@ -153,6 +200,7 @@ commandOnEngine("world.spot_open", function (f) {
         var n = spotNatives();
         var interp = ptr(VA.scriptInterpreter);
         var before = spotObjectTable();
+        var used = spot;
         n.fill(spot.record.add(SPOT_NAME), heroFull, 0);
         // The script may move records; find this one again before counting.
         spot = spotFind(gx, gy, SPOT_HIDING_PLACE);
@@ -188,6 +236,8 @@ commandOnEngine("world.spot_open", function (f) {
                 made.push(i);
             }
         }
+        // The fillScript hook does not see a call made from the tick.
+        evt("spot.open", spotOpenFields(used, made));
         return { gx: gx, gy: gy, removed: removed, items: spotItems(made).join(";") };
     };
 });

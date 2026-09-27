@@ -21,6 +21,9 @@ var companionPending = [];
 // Refs created while a loot drop runs, or null outside one.  See lootDrop.
 var lootDropping = null;
 
+// Other switchable hooks that read what objCreate collects, switched with it.
+var spawnFollowers = [];
+
 var spawnHook = switchable("objCreate", RVA.objCreate, {
     // create(type, ref, ...) returns the ref it made.  The first argument is
     // the type and the second the ref to restore, 0 for a new object: seen
@@ -67,6 +70,13 @@ function spawnWatch(wanted) {
         spawnHook.off();
         despawnHook.off();
     }
+    spawnFollowers.forEach(function (h) {
+        if (wanted) {
+            h.on();
+        } else {
+            h.off();
+        }
+    });
 }
 
 hook("spawnGateLoad", RVA.worldLoad, {
