@@ -25,7 +25,10 @@
 // quad at cEngine's cursor draw, pass 1 (0x00612160): above the world and
 // every window, under the cursor.  A frame without that pass (the main menu,
 // the load screen, a video) is drawn at flip in a scene of its own, over the
-// cursor there.  The device calls are C in a CModule: TinyCC does not honour
+// cursor there.  The texture is sampled bilinearly: a wrapper may render the
+// frame at another size than the back buffer (dgVoodoo's forced resolution
+// drew it at 2560x1600 for a 1920x1080 window), and point sampling then broke
+// small text into steps.  The device calls are C in a CModule: TinyCC does not honour
 // stdcall on a function pointer, so every COM call goes through a thunk that
 // keeps ESP in EDI, and CModule globals cannot be written here, so all state
 // lives in memory this script allocates.
@@ -119,7 +122,7 @@ var OVERLAY_C = [
     "static const uint32_t RS[] = { 27, 19, 20, 7, 14, 15, 22, 28, 137, 41, 29 };",
     "static const uint32_t RSV[] = { 1, 2, 6, 0, 0, 0, 1, 0, 0, 0, 0 };",
     "static const uint32_t TS[] = { 1, 2, 3, 4, 5, 6, 16, 17, 18, 13, 14 };",
-    "static const uint32_t TSV[] = { 2, 2, 0, 2, 2, 0, 1, 1, 1, 3, 3 };",
+    "static const uint32_t TSV[] = { 2, 2, 0, 2, 2, 0, 2, 2, 1, 3, 3 };",
     "int overlay_draw(void *dd, void *dev, uint8_t **views, uint32_t **states, int n) {",
     "  uint32_t rs[16], ts[16], s1c = 0, s1a = 0, i; void *old = 0; int k, drawn = 0;",
     "  float vx[24];",
