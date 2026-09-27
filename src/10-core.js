@@ -422,7 +422,7 @@ var sampleFrameCount = 0;
 var sampleFrameSeen = false;
 var sampleLastFrame = -1;
 var sampleWasLoading = false;
-var sampleClock = null;
+var nowClock = null;
 var sampleReported = 0;
 
 // Called by frameFlip once per presented frame.
@@ -470,29 +470,30 @@ function onSample(rate, events, fn, weight) {
     });
 }
 
-function sampleNow() {
-    if (sampleClock === null) {
+// Microseconds from QueryPerformanceCounter, for timing below a millisecond.
+function nowMicros() {
+    if (nowClock === null) {
         var k32 = Process.getModuleByName("kernel32.dll");
         var out = Memory.alloc(8);
         var qpc = new NativeFunction(k32.getExportByName("QueryPerformanceCounter"), "int",
                                      ["pointer"], { abi: "stdcall" });
         new NativeFunction(k32.getExportByName("QueryPerformanceFrequency"), "int",
                            ["pointer"], { abi: "stdcall" })(out);
-        sampleClock = { qpc: qpc, out: out, perUs: out.readU64().toNumber() / 1e6 };
+        nowClock = { qpc: qpc, out: out, perUs: out.readU64().toNumber() / 1e6 };
     }
-    sampleClock.qpc(sampleClock.out);
-    return sampleClock.out.readU64().toNumber() / sampleClock.perUs;
+    nowClock.qpc(nowClock.out);
+    return nowClock.out.readU64().toNumber() / nowClock.perUs;
 }
 
 function sampleRun(s) {
     s.runs += 1;
     var timed = s.runs % SAMPLE_TIME_EVERY === 0;
-    var start = timed ? sampleNow() : 0;
+    var start = timed ? nowMicros() : 0;
     try {
         s.fn();
     } catch (e) {}
     if (timed) {
-        s.ticks += sampleNow() - start;
+        s.ticks += nowMicros() - start;
         s.timed += 1;
     }
 }

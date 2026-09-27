@@ -12,9 +12,9 @@
 // videos'.  Nothing is sent per frame.  The rest is sampled once a second on
 // Frida's own thread, where reading memory is safe:
 //
-//   "engine.frames"          ten times a second while frames come: the rate
-//                            over the last second
-//                            and the count so far
+//   "engine.frames"          every frame, at most once a millisecond: the
+//                            last frame's length, the rate over the last
+//                            second and the count so far
 //   "engine.display"         the back buffer's size, depth or mode changed
 //   "engine.device_lost"     flip failed; "engine.device_restored" when it
 //                            succeeds again
@@ -35,8 +35,9 @@ var NATIVE_D3D = 0xC8;
 var NATIVE_DEVICE = 0xCC;
 var NATIVE_MENU_THREAD = 0x0C;      // [uiManager+0x0C], the menu thread's handle
 var NATIVE_STILL_ACTIVE = 259;
-var NATIVE_REPORT_MS = 100;
-var NATIVE_SLOW_EVERY = 1000 / NATIVE_REPORT_MS;
+var NATIVE_SLOW_MS = 1000;
+// The shortest gap between two "engine.frames", in microseconds.
+var NATIVE_FRAMES_GAP_US = 1000;
 
 var nativeFrames = 0;
 var nativeLost = false;
@@ -72,10 +73,17 @@ function nativeHex(p) {
     return p.isNull() ? "0" : p.toString();
 }
 
+// The frame's length is measured here, where the game presents it, on the
+// render thread: the time since the previous present.  Sent with every frame
+// unless the last one went out less than a millisecond ago, which only an
+// uncapped menu reaches.
 hook("frameFlip", RVA.frameFlip, {
     onEnter: function () {
         nativeFrames += 1;
         noteFrame();
+        try {
+            nativeFrame(nowMicros());
+        } catch (e) {}
     },
     onLeave: function (retval) {
         var failed = retval.toInt32() < 0;
@@ -120,24 +128,25 @@ function nativeDisplay() {
 var nativeLastThreads = null;
 var nativeLastDisplay = null;
 var nativeFps = 0;
-// (time, frames) every tenth of a second, the last second of them: the rate
-// is taken over a second and reported ten times in it.
-var nativeSamples = [];
+// When each frame of the last second was presented, in microseconds.
+var nativeTimes = [];
+var nativeSent = 0;
 
-function nativeSample() {
-    var now = Date.now();
-    var frames = nativeFrames;
-    nativeSamples.push([now, frames]);
-    while (nativeSamples.length > 1 && now - nativeSamples[0][0] > 1000) {
-        nativeSamples.shift();
+function nativeFrame(now) {
+    var prev = nativeTimes.length > 0 ? nativeTimes[nativeTimes.length - 1] : 0;
+    nativeTimes.push(now);
+    while (nativeTimes.length > 1 && now - nativeTimes[0] > 1e6) {
+        nativeTimes.shift();
     }
-    var first = nativeSamples[0];
-    if (now > first[0]) {
-        nativeFps = Math.round((frames - first[1]) * 10000 / (now - first[0])) / 10;
+    var span = now - nativeTimes[0];
+    if (span > 0) {
+        nativeFps = Math.round((nativeTimes.length - 1) * 1e7 / span) / 10;
     }
-    if (frames !== first[1]) {
-        evt("engine.frames", { fps: nativeFps, frames: frames });
+    if (prev === 0 || now - nativeSent < NATIVE_FRAMES_GAP_US) {
+        return;
     }
+    nativeSent = now;
+    evt("engine.frames", { fps: nativeFps, frames: nativeFrames, frameUs: Math.round(now - prev) });
 }
 
 // The display and the threads, once a second.
@@ -170,17 +179,11 @@ function nativeSlow() {
     nativeLastThreads = threads;
 }
 
-var nativeTicks = 0;
-
 setInterval(function () {
     try {
-        nativeSample();
-        nativeTicks += 1;
-        if (nativeTicks % NATIVE_SLOW_EVERY === 0) {
-            nativeSlow();
-        }
+        nativeSlow();
     } catch (e) {}
-}, NATIVE_REPORT_MS);
+}, NATIVE_SLOW_MS);
 
 command("native.info", function () {
     var n = nativeNatives();
