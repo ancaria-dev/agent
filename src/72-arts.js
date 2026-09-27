@@ -143,7 +143,7 @@ command("player.art", function (f) {
 // +0xFC becomes 6 (11 for one variant), the target's ref lands at +0x100,
 // its sector and position at +0x104..+0x10C, the global art id at +0x120.
 // Hooking the receive_event that does it would cost a callback on every
-// creature's event, hundreds a second, so the word is read on every tick
+// creature's event, hundreds a second, so the word is read every frame
 // instead: one read, and an art stays in that state for a good part of a
 // second.  It reports what the hero took up, not whether it landed.
 var ART_ACTION = 0xFC;
@@ -151,7 +151,7 @@ var ART_ACTION_ART = [6, 11];
 var ART_ACTION_FIELDS = { target: 0x100, sector: 0x104, x: 0x108, y: 0x10C, id: 0x120 };
 var artActionLast = 0;
 
-onTick(function () {
+onSample(SAMPLE_FREQUENT, ["art.used"], function () {
     if (!live(heroFull)) {
         artActionLast = 0;
         return;

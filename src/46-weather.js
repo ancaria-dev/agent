@@ -116,12 +116,12 @@ var weatherLast = null;
 // another mod asked for.
 var weatherOwn = {};
 
-// A turn of rain, fog or snow is asked about on the tick that sees it, on the
-// engine thread, at most half a second after showWorld decided it.  A veto
-// sends the game the opposite message at once: back to the strength it had,
-// or to none, so a few frames of the refused weather may show.  The weather
-// that stands is then reported.
-onTickEvery(500, function () {
+// A turn of rain, fog or snow is asked about on the frame that sees it, on
+// the engine thread, one frame after showWorld decided it.  A veto sends the
+// game the opposite message at once: back to the strength it had, or to none,
+// so the refused weather may show for that frame.  The weather that stands is
+// then reported.
+onSample(SAMPLE_FREQUENT, ["weather.change", "weather.changed"], function () {
     if (isLoading()) {
         weatherLast = null;
         return;

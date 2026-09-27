@@ -349,7 +349,7 @@ command("world.object", function (f) {
 // on.  A load starts over, so the horse a save begins on is not a change.
 var mountLast = null;
 
-onTickEvery(250, function () {
+onSample(SAMPLE_FREQUENT, ["horse.mount", "horse.dismount"], function () {
     if (isLoading() || !live(heroFull)) {
         mountLast = null;
         return;
@@ -384,6 +384,7 @@ onHero(function () {
 // create hook saw are watched for a few seconds, rather than walking the
 // whole object table.  After a load, the table is walked once for the
 // companions the save brought along, and those are not reported as joining.
+// Sampled at NORMAL: each run reads every watched creature's record.
 var COMPANION_WAIT = 5000;
 var companions = null;
 
@@ -413,7 +414,7 @@ function companionScan(hero) {
     return found;
 }
 
-onTickEvery(500, function () {
+onSample(SAMPLE_NORMAL, ["companion.joined", "companion.left"], function () {
     if (isLoading() || !live(heroFull)) {
         companions = null;
         companionPending = [];

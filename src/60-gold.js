@@ -94,7 +94,7 @@ hook("goldDelta", RVA.goldDelta, {
     }
 });
 
-// Everything after the boost happens on the tick instead of on its own hook.
+// Everything after the boost is sampled every frame instead of hooked.
 //
 // Three sites used to live here: the write, the sheet/full sync and the
 // epilogue.  Each one crashed the game in its own way.  The write split a
@@ -102,10 +102,10 @@ hook("goldDelta", RVA.goldDelta, {
 // relocation the trampoline could not be trusted with (one of them reads the
 // stack through ESP).  None of them had to be a hook: the total is a number
 // that can be read a moment later, and the anti-cheat checker runs on a timer,
-// so being a few milliseconds late costs nothing.
+// so being a frame late costs nothing.
 var lastGold = -1;
 
-onTick(function () {
+onSample(SAMPLE_FREQUENT, ["gold.changed"], function () {
     if (!live(heroFull) || !live(heroSheet)) {
         return;
     }

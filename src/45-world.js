@@ -206,11 +206,12 @@ command("world.area_set", function (f) {
 
 // Sampled, not hooked: the hero's area follows its sector, and an area is
 // cleared inside the kill statistics.  A kill counts in the victim's area,
-// which is why every area is watched, not only the hero's.
+// which is why every area is watched, not only the hero's.  NORMAL, because
+// each run reads all 32 area entries.
 var areaLastKey = null;
 var areaLastCounts = null;
 
-onTickEvery(500, function () {
+onSample(SAMPLE_NORMAL, ["world.area", "world.area_cleared"], function () {
     if (isLoading() || !live(heroFull)) {
         areaLastKey = null;
         areaLastCounts = null;

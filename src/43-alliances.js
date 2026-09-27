@@ -160,11 +160,12 @@ commandLater("world.class_set", function (f) {
 });
 
 // A change to the matrix, whoever made it: a mod, a quest effect, a loaded
-// save.  Sampled once a second and reported per changed pair.  The first
-// reading after a load is how the save left it, not a change.
+// save.  Reported per changed pair.  NORMAL, because each run reads the whole
+// 16 by 16 table.  The first reading after a load is how the save left it,
+// not a change.
 var allianceLast = null;
 
-onTickEvery(1000, function () {
+onSample(SAMPLE_NORMAL, ["alliance.changed"], function () {
     if (isLoading() || !live(heroFull)) {
         allianceLast = null;
         return;

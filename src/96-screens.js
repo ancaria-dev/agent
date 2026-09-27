@@ -425,10 +425,10 @@ command("world.portal_set", function (f) {
 });
 
 // A portal opened or closed, whoever did it: walking up to it, a quest, a
-// mod.  Sampled once a second; the mask a save brings is not a change.
+// mod.  One read a frame; the mask a save brings is not a change.
 var portalLast = null;
 
-onTickEvery(1000, function () {
+onSample(SAMPLE_FREQUENT, ["ui.portal_opened", "ui.portal_closed"], function () {
     if (isLoading() || !live(heroFull)) {
         portalLast = null;
         return;

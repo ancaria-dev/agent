@@ -136,11 +136,11 @@ command("world.time_scale", function (f) {
 
 var calendarLast = null;
 
-// A new hour is asked about on the tick that sees it, on the engine thread.  A
+// A new hour is asked about on the frame that sees it, on the engine thread.  A
 // veto sends the clock back to the start of the hour that ended, so that hour
 // runs again; a change sends it to the start of the hour the mod chose.  A
 // jump the loader made itself is only reported.
-onTickEvery(1000, function () {
+onSample(SAMPLE_FREQUENT, ["world.hour_change", "world.hour", "world.daytime"], function () {
     if (isLoading()) {
         calendarLast = null;
         return;

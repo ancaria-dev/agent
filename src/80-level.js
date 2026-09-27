@@ -17,10 +17,10 @@
 // Nothing is lost by moving.  The level was already report-only: it is one of
 // the fields the anti-cheat mirrors XOR-encoded, and it drives the grant tables,
 // so rewriting it would desync both.  A number that only has to be noticed can
-// be noticed a few milliseconds later.
+// be noticed a frame later.
 var lastLevel = 0;
 
-onTick(function () {
+onSample(SAMPLE_FREQUENT, ["level.changed"], function () {
     if (!live(heroFull)) {
         return;
     }
@@ -39,7 +39,7 @@ onTick(function () {
         return;
     }
     // The game's level-up loop runs to completion inside addExperience, so a
-    // big grant is already several levels by the time the tick sees it.  Those
+    // big grant is already several levels by the time the sampler sees it.  Those
     // levels really did happen, and a mod that rewards one per level should get
     // one per level, so the gap is reported step by step rather than as a
     // single jump from 20 to 35.

@@ -408,14 +408,53 @@ command("player.use", function (f) {
     return { ok: 1, art: art, target: target };
 });
 
-// What changed on the bar, twice a second: a slot's contents, the selection,
-// or a newly opened slot.  What a loaded save brings is not a change.
+// What changed on the bar: a slot's contents, the selection, or a newly
+// opened slot.  What a loaded save brings is not a change.
+//
+// Every frame, so a slot switched and switched back is still seen.  Building
+// the whole state reads every slot's item, so each frame first compares the
+// raw bytes behind the slots and the selection, one read, and builds the state
+// only when they moved.  An item retyped in place keeps its bytes here, so the
+// state is also built every SAMPLE_NORMAL frames regardless.
+var TASK_WATCH_BYTES = TASK_SELECTED + 4 - TASK_WEAPONS;
 var taskLast = null;
+var taskRaw = null;
+var taskRuns = 0;
 
-onTickEvery(500, function () {
+// Whether the watched bytes, the form and the level are what they were.
+function taskUnchanged(bag) {
+    var now = {
+        words: new Uint32Array(bag.add(TASK_WEAPONS).readByteArray(TASK_WATCH_BYTES)),
+        flags: bag.add(TASK_BAG_FLAGS).readU16(),
+        level: heroFull.add(TASK_LEVEL).readU16()
+    };
+    var before = taskRaw;
+    taskRaw = now;
+    if (before === null || before.flags !== now.flags || before.level !== now.level) {
+        return false;
+    }
+    for (var i = 0; i < now.words.length; i++) {
+        if (now.words[i] !== before.words[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+onSample(SAMPLE_FREQUENT, ["taskbar.opened", "taskbar.art_changed", "taskbar.weapon_changed",
+                           "taskbar.selected"], function () {
     var bag = isLoading() ? null : taskBag();
     if (bag === null) {
         taskLast = null;
+        taskRaw = null;
+        return;
+    }
+    taskRuns += 1;
+    try {
+        if (taskUnchanged(bag) && taskLast !== null && taskRuns % SAMPLE_NORMAL !== 0) {
+            return;
+        }
+    } catch (e) {
         return;
     }
     var now;
@@ -466,4 +505,5 @@ onTickEvery(500, function () {
 
 onHero(function () {
     taskLast = null;
+    taskRaw = null;
 });

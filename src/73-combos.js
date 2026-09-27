@@ -176,11 +176,11 @@ hook("comboReady", RVA.comboReady, {
     }
 });
 
-// A slot's steps changed, whoever changed them: the master, a mod.  Sampled
-// twice a second; the combos a save brings are not a change.
+// A slot's steps changed, whoever changed them: the master, a mod.  The
+// combos a save brings are not a change.
 var comboLast = null;
 
-onTickEvery(500, function () {
+onSample(SAMPLE_NORMAL, ["combo.changed"], function () {
     if (isLoading() || !live(heroSheet)) {
         comboLast = null;
         return;
