@@ -71,10 +71,6 @@ function inputNatives() {
         inputUser = {
             keyState: new NativeFunction(user32.getExportByName("GetKeyState"), "int16", ["int"],
                                          { abi: "stdcall" }),
-            clientRect: new NativeFunction(user32.getExportByName("GetClientRect"), "int",
-                                           ["pointer", "pointer"], { abi: "stdcall" }),
-            screenToClient: new NativeFunction(user32.getExportByName("ScreenToClient"), "int",
-                                               ["pointer", "pointer"], { abi: "stdcall" }),
             unicode: new NativeFunction(user32.getExportByName("IsWindowUnicode"), "int", ["pointer"],
                                         { abi: "stdcall" }),
             layout: new NativeFunction(user32.getExportByName("GetKeyboardLayout"), "pointer", ["uint32"],
@@ -88,7 +84,6 @@ function inputNatives() {
                                       { abi: "stdcall" }),
             bytes: Memory.alloc(4),
             wide: Memory.alloc(8),
-            rect: Memory.alloc(16),
             point: Memory.alloc(8)
         };
     }
@@ -161,26 +156,21 @@ function inputKeyFields(wParam, lParam, mods) {
     };
 }
 
-// A client point in the game's own pixels: the back buffer's size over the
-// client area's, which differ when a wrapper stretches the window.
-function inputGamePoint(hwnd, cx, cy) {
+// Where the cursor is, in the game's own pixels: the point the game draws its
+// cursor at, read through its own function (0x0066E6E0).  A message's lParam
+// is not that point: in fullscreen a wrapper such as dgVoodoo redirects the
+// game's cursor calls, and a layer hit-tested with lParam took clicks far
+// from where the cursor was drawn.
+var inputCursorFn = null;
+
+function inputGamePoint(hwnd) {
     var n = inputNatives();
-    var x = cx;
-    var y = cy;
-    try {
-        var driver = ptr(VA.dxDriver).readPointer();
-        if (!driver.isNull() && n.clientRect(hwnd, n.rect) !== 0) {
-            var cw = n.rect.add(8).readS32();
-            var ch = n.rect.add(12).readS32();
-            var gw = driver.add(0x20).readU16();
-            var gh = driver.add(0x1C).readU16();
-            if (cw > 0 && ch > 0 && gw > 0 && gh > 0) {
-                x = Math.floor(cx * gw / cw);
-                y = Math.floor(cy * gh / ch);
-            }
-        }
-    } catch (e) {}
-    return { x: x, y: y };
+    if (inputCursorFn === null) {
+        inputCursorFn = new NativeFunction(at(RVA.cursorClient), "void", ["pointer", "pointer"],
+                                           { abi: "mscdecl" });
+    }
+    inputCursorFn(hwnd, n.point);
+    return { x: n.point.readS32(), y: n.point.add(4).readS32() };
 }
 
 function inputLowWord(v) {
@@ -249,7 +239,7 @@ function inputMessage(hwnd, msg, wParam, lParam) {
         if (id === INPUT_XBUTTON) {
             id = ((wParam >>> 16) & 0xFFFF) === 2 ? 5 : 4;
         }
-        var point = inputGamePoint(hwnd, inputLowWord(lParam), inputHighWord(lParam));
+        var point = inputGamePoint(hwnd);
         var mods = inputMods();
         if (button[1] === "up") {
             if (inputOverlay("release", id, point, 0, mods)) {
@@ -274,16 +264,11 @@ function inputMessage(hwnd, msg, wParam, lParam) {
     }
     if (msg === INPUT_MOUSEMOVE) {
         // The game draws its own cursor from these, so a move always reaches it.
-        inputOverlay("move", 0, inputGamePoint(hwnd, inputLowWord(lParam), inputHighWord(lParam)),
-                     0, 0);
+        inputOverlay("move", 0, inputGamePoint(hwnd), 0, 0);
         return true;
     }
     if (msg === INPUT_MOUSEWHEEL) {
-        var n = inputNatives();
-        n.point.writeS32(inputLowWord(lParam));
-        n.point.add(4).writeS32(inputHighWord(lParam));
-        n.screenToClient(hwnd, n.point);
-        var at = inputGamePoint(hwnd, n.point.readS32(), n.point.add(4).readS32());
+        var at = inputGamePoint(hwnd);
         var delta = inputHighWord(wParam);
         var wheelMods = inputMods();
         if (inputOverlay("wheel", 0, at, delta, wheelMods)) {
