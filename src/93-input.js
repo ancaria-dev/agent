@@ -15,6 +15,11 @@
 //                    A repeat is reported, never asked.
 //   "key.release"    a key came up.
 //   "key.type"       the character a press typed, for a press not vetoed.
+//                    The window is an ANSI one (CreateWindowExA), so WM_CHAR
+//                    carries a byte in the code page of the keyboard layout,
+//                    not UTF-16: a Russian "ф" arrives as 0xF4.  The byte is
+//                    turned into UTF-16 through that code page, and a
+//                    double-byte character's two messages into one.
 //   "mouse.press"    a button went down, asked; a veto keeps the button and
 //                    its release from the game.
 //   "mouse.release"  a button came up.
@@ -57,6 +62,8 @@ var inputButtonsHeld = {};
 // The characters TranslateMessage made of a vetoed press come right after it.
 var inputSwallowChars = false;
 var inputUser = null;
+var inputPages = {};
+var inputLead = -1;
 
 function inputNatives() {
     if (inputUser === null) {
@@ -68,6 +75,19 @@ function inputNatives() {
                                            ["pointer", "pointer"], { abi: "stdcall" }),
             screenToClient: new NativeFunction(user32.getExportByName("ScreenToClient"), "int",
                                                ["pointer", "pointer"], { abi: "stdcall" }),
+            unicode: new NativeFunction(user32.getExportByName("IsWindowUnicode"), "int", ["pointer"],
+                                        { abi: "stdcall" }),
+            layout: new NativeFunction(user32.getExportByName("GetKeyboardLayout"), "pointer", ["uint32"],
+                                       { abi: "stdcall" }),
+            locale: new NativeFunction(Process.getModuleByName("kernel32.dll").getExportByName("GetLocaleInfoW"),
+                                       "int", ["uint32", "uint32", "pointer", "int"], { abi: "stdcall" }),
+            lead: new NativeFunction(Process.getModuleByName("kernel32.dll").getExportByName("IsDBCSLeadByteEx"),
+                                     "int", ["uint32", "uint8"], { abi: "stdcall" }),
+            widen: new NativeFunction(Process.getModuleByName("kernel32.dll").getExportByName("MultiByteToWideChar"),
+                                      "int", ["uint32", "uint32", "pointer", "int", "pointer", "int"],
+                                      { abi: "stdcall" }),
+            bytes: Memory.alloc(4),
+            wide: Memory.alloc(8),
             rect: Memory.alloc(16),
             point: Memory.alloc(8)
         };
@@ -88,6 +108,48 @@ function inputMods() {
         mods |= INPUT_ALT;
     }
     return mods;
+}
+
+// The keyboard layout's ANSI code page, which WM_CHAR's byte is in.
+var INPUT_LOCALE_ANSI_PAGE = 0x1004 | 0x20000000;   // LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER
+
+function inputCodePage(n) {
+    var language = n.layout(0).toUInt32() & 0xFFFF;
+    var page = inputPages[language];
+    if (page === undefined) {
+        page = n.locale(language, INPUT_LOCALE_ANSI_PAGE, n.wide, 2) !== 0 ? n.wide.readU32() : 0;
+        inputPages[language] = page;
+    }
+    return page;
+}
+
+// WM_CHAR's wParam as UTF-16 code units: none while a double-byte
+// character's first half waits for its second.
+function inputChars(hwnd, wParam) {
+    var n = inputNatives();
+    if (n.unicode(hwnd) !== 0) {
+        return [wParam & 0xFFFF];
+    }
+    var b = wParam & 0xFF;
+    var page = inputCodePage(n);
+    var count = 1;
+    if (inputLead >= 0) {
+        n.bytes.writeU8(inputLead);
+        n.bytes.add(1).writeU8(b);
+        count = 2;
+        inputLead = -1;
+    } else if (n.lead(page, b) !== 0) {
+        inputLead = b;
+        return [];
+    } else {
+        n.bytes.writeU8(b);
+    }
+    var made = n.widen(page, 0, n.bytes, count, n.wide, 2);
+    var out = [];
+    for (var i = 0; i < made; i++) {
+        out.push(n.wide.add(2 * i).readU16());
+    }
+    return out.length > 0 ? out : [b];
 }
 
 function inputKeyFields(wParam, lParam, mods) {
@@ -165,7 +227,11 @@ function inputMessage(hwnd, msg, wParam, lParam) {
         if (inputSwallowChars) {
             return false;
         }
-        evt("key.type", { ch: wParam & 0xFFFF, mods: inputMods() });
+        var typed = inputChars(hwnd, wParam);
+        var typedMods = inputMods();
+        for (var c = 0; c < typed.length; c++) {
+            evt("key.type", { ch: typed[c], mods: typedMods });
+        }
         return true;
     }
     if (msg === INPUT_KEYUP || msg === INPUT_SYSKEYUP) {
