@@ -12,10 +12,12 @@
     "comboReady": "8b4424048b890e01",
     "commitStats": "83ec0c56578bf1e8",
     "console": "6aff688cdc860064",
+    "cursorDraw": "6aff684fd8860064",
     "discover": "ff81ec560000c390",
     "exitGame": "68f4b49e00e8c68f",
     "expWrite": "89430c0f8e990000",
     "fillScript": "51535556578b7c24",
+    "frameFlip": "83ec7c5355568bf1",
     "gameStart": "568bf1668b460466",
     "gameStop": "6aff685115880064",
     "getLocalHero": "56578bf9e8a73b1d",
@@ -53,6 +55,8 @@
     "uiCommand": "56578bf933f68b47",
     "uiEvent": "64a1000000006aff",
     "windowShow": "64a1000000006aff",
+    "wndProcMenu": "64a1000000006aff",
+    "wndProcWorld": "64a1000000006aff",
     "worldLoad": "6aff686ecf860064"
   }
 }
