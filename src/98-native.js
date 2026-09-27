@@ -12,7 +12,7 @@
 // videos'.  Nothing is sent per frame.  The rest is sampled once a second on
 // Frida's own thread, where reading memory is safe:
 //
-//   "engine.frames"          every five seconds while frames come: the rate
+//   "engine.frames"          every second while frames come: the rate
 //                            and the count so far
 //   "engine.display"         the back buffer's size, depth or mode changed
 //   "engine.device_lost"     flip failed; "engine.device_restored" when it
@@ -34,7 +34,7 @@ var NATIVE_D3D = 0xC8;
 var NATIVE_DEVICE = 0xCC;
 var NATIVE_MENU_THREAD = 0x0C;      // [uiManager+0x0C], the menu thread's handle
 var NATIVE_STILL_ACTIVE = 259;
-var NATIVE_REPORT_MS = 5000;
+var NATIVE_REPORT_MS = 1000;
 
 var nativeFrames = 0;
 var nativeLost = false;
