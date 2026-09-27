@@ -75,6 +75,7 @@ function nativeHex(p) {
 hook("frameFlip", RVA.frameFlip, {
     onEnter: function () {
         nativeFrames += 1;
+        noteFrame();
     },
     onLeave: function (retval) {
         var failed = retval.toInt32() < 0;

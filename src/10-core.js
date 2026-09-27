@@ -394,6 +394,152 @@ function onTickEvery(ms, fn) {
     });
 }
 
+// Sampling: watching state that has no safe hook, the last resort after a
+// function entry.  A sampler reads the state and reports what differs from its
+// last reading, so a change undone between two readings is never seen.  Mods
+// learn this from @Sampled on the event, whose Rate must match the rate here;
+// a zygote test compares the two, reading the event names from the onSample
+// calls themselves, so declare them there literally.
+//
+// Rates count frames, not ticks: the tick runs several times a frame, a number
+// nobody has measured, while frames are counted by the frameFlip hook.
+var SAMPLE_FREQUENT = 1;
+var SAMPLE_NORMAL = 16;
+var SAMPLE_SLOW = 64;
+// Every rate divides the cycle, so a phase in it describes every frame.
+var SAMPLE_CYCLE = 64;
+// Samplers are timed on one run in this many, and the figures reported to the
+// host this often.
+var SAMPLE_TIME_EVERY = 8;
+var SAMPLE_REPORT_MS = 30000;
+
+var samplers = [];
+var sampleLoad = [];
+for (var sampleSlot = 0; sampleSlot < SAMPLE_CYCLE; sampleSlot++) {
+    sampleLoad.push(0);
+}
+var sampleFrameCount = 0;
+var sampleFrameSeen = false;
+var sampleLastFrame = -1;
+var sampleWasLoading = false;
+var sampleClock = null;
+var sampleReported = 0;
+
+// Called by frameFlip once per presented frame.
+function noteFrame() {
+    sampleFrameCount += 1;
+    sampleFrameSeen = true;
+}
+
+// Balancing: a NORMAL sampler runs on the frames p, p+16, p+32, p+48 of the
+// cycle, a SLOW one on a single frame of it.  The phase goes where the busiest
+// of those frames carries the least weight so far, the earliest on a tie, so
+// the samplers spread over the cycle instead of all running on frame 0.
+// Samplers register in file order, so the result is the same every run.
+function samplePhase(rate, weight) {
+    if (rate === SAMPLE_FREQUENT) {
+        return 0;
+    }
+    var best = 0;
+    var bestLoad = Infinity;
+    for (var phase = 0; phase < rate; phase++) {
+        var load = 0;
+        for (var f = phase; f < SAMPLE_CYCLE; f += rate) {
+            load = Math.max(load, sampleLoad[f]);
+        }
+        if (load < bestLoad) {
+            best = phase;
+            bestLoad = load;
+        }
+    }
+    for (var g = best; g < SAMPLE_CYCLE; g += rate) {
+        sampleLoad[g] += weight;
+    }
+    return best;
+}
+
+// `events` are the wire names the sampler sends.  `weight` is what one run
+// costs next to the others, 1 unless the reported figures say otherwise.
+function onSample(rate, events, fn, weight) {
+    if (rate !== SAMPLE_FREQUENT && rate !== SAMPLE_NORMAL && rate !== SAMPLE_SLOW) {
+        throw new Error("No sampling rate " + rate + ".");
+    }
+    samplers.push({
+        rate: rate, phase: samplePhase(rate, weight || 1), events: events, fn: fn,
+        runs: 0, timed: 0, ticks: 0
+    });
+}
+
+function sampleNow() {
+    if (sampleClock === null) {
+        var k32 = Process.getModuleByName("kernel32.dll");
+        var out = Memory.alloc(8);
+        var qpc = new NativeFunction(k32.getExportByName("QueryPerformanceCounter"), "int",
+                                     ["pointer"], { abi: "stdcall" });
+        new NativeFunction(k32.getExportByName("QueryPerformanceFrequency"), "int",
+                           ["pointer"], { abi: "stdcall" })(out);
+        sampleClock = { qpc: qpc, out: out, perUs: out.readU64().toNumber() / 1e6 };
+    }
+    sampleClock.qpc(sampleClock.out);
+    return sampleClock.out.readU64().toNumber() / sampleClock.perUs;
+}
+
+function sampleRun(s) {
+    s.runs += 1;
+    var timed = s.runs % SAMPLE_TIME_EVERY === 0;
+    var start = timed ? sampleNow() : 0;
+    try {
+        s.fn();
+    } catch (e) {}
+    if (timed) {
+        s.ticks += sampleNow() - start;
+        s.timed += 1;
+    }
+}
+
+function sampleReport() {
+    var now = Date.now();
+    if (now - sampleReported < SAMPLE_REPORT_MS) {
+        return;
+    }
+    sampleReported = now;
+    var parts = [];
+    for (var i = 0; i < samplers.length; i++) {
+        var s = samplers[i];
+        if (s.timed > 0) {
+            parts.push(s.events[0] + " " + (s.ticks / s.timed).toFixed(1) + " us");
+        }
+    }
+    if (parts.length > 0) {
+        note("sampling per run: " + parts.join(", "));
+    }
+}
+
+onTick(function () {
+    if (samplers.length === 0) {
+        return;
+    }
+    // Without frameFlip (its module skipped) a frame is taken as 16 ms.
+    var frame = sampleFrameSeen ? sampleFrameCount : Math.floor(Date.now() / 16);
+    var loading = isLoading();
+    // Entering or leaving a load runs everyone once, so each sampler sees the
+    // load and starts over, whatever frame it falls on.
+    var all = loading !== sampleWasLoading;
+    sampleWasLoading = loading;
+    if (frame === sampleLastFrame && !all) {
+        return;
+    }
+    sampleLastFrame = frame;
+    var slot = frame % SAMPLE_CYCLE;
+    for (var i = 0; i < samplers.length; i++) {
+        var s = samplers[i];
+        if (all || s.rate === SAMPLE_FREQUENT || slot % s.rate === s.phase) {
+            sampleRun(s);
+        }
+    }
+    sampleReport();
+});
+
 // Work that calls into the game or writes what the engine is using runs here,
 // never on Frida's thread where commands run: a command queues it and returns.
 // Nothing runs while a world loads, and a full queue refuses rather than grows.
