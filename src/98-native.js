@@ -15,7 +15,8 @@
 //   "engine.frames"          every frame, at most once a millisecond: the
 //                            last frame's length, the rate over the last
 //                            second and the count so far
-//   "engine.display"         the back buffer's size, depth or mode changed
+//   "engine.display"         the back buffer's size, depth or mode changed,
+//                            or the refresh rate of the window's monitor
 //   "engine.device_lost"     flip failed; "engine.device_restored" when it
 //                            succeeds again
 //   "engine.thread_started"  the render or menu thread came, or went
@@ -35,6 +36,18 @@ var NATIVE_D3D = 0xC8;
 var NATIVE_DEVICE = 0xCC;
 var NATIVE_MENU_THREAD = 0x0C;      // [uiManager+0x0C], the menu thread's handle
 var NATIVE_STILL_ACTIVE = 259;
+// The refresh rate of the monitor the window is on: MonitorFromWindow,
+// GetMonitorInfoW into a MONITORINFOEXW (104 bytes, device name at 40), then
+// EnumDisplaySettingsW's current mode into a DEVMODEW (220 bytes, dmSize at
+// 68, dmDriverExtra at 70, dmDisplayFrequency at 184).
+var NATIVE_MONITOR_NEAREST = 2;
+var NATIVE_MONITORINFO_SIZE = 104;
+var NATIVE_MONITOR_DEVICE = 40;
+var NATIVE_DEVMODE_SIZE = 220;
+var NATIVE_DEVMODE_SIZE_AT = 68;
+var NATIVE_DEVMODE_EXTRA_AT = 70;
+var NATIVE_DEVMODE_FREQUENCY = 184;
+var NATIVE_ENUM_CURRENT = 0xFFFFFFFF;
 var NATIVE_SLOW_MS = 1000;
 // The shortest gap between two "engine.frames", in microseconds.
 var NATIVE_FRAMES_GAP_US = 1000;
@@ -58,6 +71,14 @@ function nativeNatives() {
                                            { abi: "stdcall" }),
             clientRect: new NativeFunction(user32.getExportByName("GetClientRect"), "int",
                                            ["pointer", "pointer"], { abi: "stdcall" }),
+            monitor: new NativeFunction(user32.getExportByName("MonitorFromWindow"), "pointer",
+                                        ["pointer", "uint32"], { abi: "stdcall" }),
+            monitorInfo: new NativeFunction(user32.getExportByName("GetMonitorInfoW"), "int",
+                                            ["pointer", "pointer"], { abi: "stdcall" }),
+            displayMode: new NativeFunction(user32.getExportByName("EnumDisplaySettingsW"), "int",
+                                            ["pointer", "uint32", "pointer"], { abi: "stdcall" }),
+            info: Memory.alloc(NATIVE_MONITORINFO_SIZE),
+            mode: Memory.alloc(NATIVE_DEVMODE_SIZE),
             out: Memory.alloc(16)
         };
     }
@@ -112,6 +133,31 @@ function nativeThreads() {
     return threads;
 }
 
+// Hertz, or 0 when Windows does not say (0 and 1 mean the hardware default).
+function nativeRefresh(hwnd) {
+    if (hwnd.isNull()) {
+        return 0;
+    }
+    var n = nativeNatives();
+    var monitor = n.monitor(hwnd, NATIVE_MONITOR_NEAREST);
+    if (monitor.isNull()) {
+        return 0;
+    }
+    n.info.writeU32(NATIVE_MONITORINFO_SIZE);
+    if (n.monitorInfo(monitor, n.info) === 0) {
+        return 0;
+    }
+    // A driver's extra bytes from the last call would make Windows write past
+    // the buffer, so both size fields are set on every call.
+    n.mode.add(NATIVE_DEVMODE_SIZE_AT).writeU16(NATIVE_DEVMODE_SIZE);
+    n.mode.add(NATIVE_DEVMODE_EXTRA_AT).writeU16(0);
+    if (n.displayMode(n.info.add(NATIVE_MONITOR_DEVICE), NATIVE_ENUM_CURRENT, n.mode) === 0) {
+        return 0;
+    }
+    var hz = n.mode.add(NATIVE_DEVMODE_FREQUENCY).readU32();
+    return hz > 1 ? hz : 0;
+}
+
 function nativeDisplay() {
     var d = nativeDriver();
     if (d === null) {
@@ -121,7 +167,8 @@ function nativeDisplay() {
         width: d.add(NATIVE_WIDTH).readU16(),
         height: d.add(NATIVE_HEIGHT).readU16(),
         bpp: d.add(NATIVE_BPP).readU32(),
-        fullscreen: d.add(NATIVE_FULLSCREEN).readU32() === 1 ? 1 : 0
+        fullscreen: d.add(NATIVE_FULLSCREEN).readU32() === 1 ? 1 : 0,
+        refresh: nativeRefresh(d.add(NATIVE_HWND).readPointer())
     };
 }
 
