@@ -22,7 +22,11 @@
 //   "engine.thread_started"  the render or menu thread came, or went
 //   "engine.thread_ended"    (role, id)
 //
-//   native.info              everything above, read now
+//   native.info              everything above, read now, and the seconds
+//                            the engine's last frame moved the world
+//
+// The game keeps no target frame rate to read: its own limiter (0x0060ACE0)
+// is switched off in memory by pHD.dll, whose PHD_FPS_LIMIT decides.
 
 var NATIVE_HEIGHT = 0x1C;
 var NATIVE_WIDTH = 0x20;
@@ -35,6 +39,7 @@ var NATIVE_BACK = 0xBC;
 var NATIVE_D3D = 0xC8;
 var NATIVE_DEVICE = 0xCC;
 var NATIVE_MENU_THREAD = 0x0C;      // [uiManager+0x0C], the menu thread's handle
+var NATIVE_FRAME_DELTA = 0xB0;      // [engine+0xB0], float seconds
 var NATIVE_STILL_ACTIVE = 259;
 // The refresh rate of the monitor the window is on: MonitorFromWindow,
 // GetMonitorInfoW into a MONITORINFOEXW (104 bytes, device name at 40), then
@@ -247,6 +252,10 @@ command("native.info", function () {
     var threads = nativeThreads();
     out.render = threads.render;
     out.menu = threads.menu;
+    var engine = ptr(VA.engine).readPointer();
+    if (!engine.isNull()) {
+        out.delta = engine.add(NATIVE_FRAME_DELTA).readFloat();
+    }
     var d = nativeDriver();
     if (d === null) {
         return out;
