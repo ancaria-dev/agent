@@ -57,7 +57,10 @@ function uiString(key) {
             return null;
         }
         var wide = str.readUtf16String(200);
-        return (wide === null || wide === "") ? str.readCString(200) : wide;
+        // readCString(200) reads all 200 bytes, NUL or not, and handed back
+        // the text with whatever followed it.  readAnsiString stops at the
+        // NUL, and the game's narrow text is ANSI anyway.
+        return (wide === null || wide === "") ? str.readAnsiString(200) : wide;
     } catch (e) {
         return null;
     }
