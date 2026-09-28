@@ -45,6 +45,78 @@ function ask(name, fields) {
     return { cancel: verdict.cancel === true, set: verdict.set || {} };
 }
 
+// A loading stage.  The game thread waits here while the loader starts the
+// mods of that stage: each has one second, and the loader kicks out a mod
+// still running at two, so the host answers within about two seconds per
+// point and on the loader's behalf after five.  Not an ask: nothing is
+// decided, and isLoading() does not apply, because the game is loading on
+// purpose here.  With the JVM gone (asking off) it returns at once.
+var stageAnswers = {};
+// Threads parked in a stage right now.  While one is, there is no tick, so
+// work queued for the tick would wait for nothing: commandLater and
+// commandOnEngine refuse it instead.
+var stageHold = 0;
+// Where the loading screen's text lives during the current stage, if the game
+// draws one: { at, size, saved }.  The host sends the mods' names for it.
+var stageLabel = null;
+
+function stage(point, fields, label, labelSize) {
+    if (!askEnabled) {
+        return;
+    }
+    var seq = seqCounter++;
+    stageHold += 1;
+    if (label) {
+        try {
+            stageLabel = { at: label, size: labelSize, saved: label.readByteArray(labelSize) };
+        } catch (e) {
+            stageLabel = null;
+        }
+    }
+    try {
+        send({ type: "stage", id: seq, result: point, returns: fields || {} });
+        while (stageAnswers[seq] === undefined) {
+            var op = recv("stage", function (msg) {
+                stageAnswers[msg.seq] = true;
+            });
+            op.wait();
+        }
+        delete stageAnswers[seq];
+    } finally {
+        stageHold -= 1;
+        if (stageLabel !== null) {
+            try {
+                stageLabel.at.writeByteArray(stageLabel.saved);
+            } catch (e) {}
+            stageLabel = null;
+        }
+    }
+}
+
+// A stage nothing waits for: PostWorld, the world gone, a late attach.
+function stageNotice(point, fields) {
+    if (askEnabled) {
+        send({ type: "stage", id: 0, result: point, returns: fields || {} });
+    }
+}
+
+// The loading screen's text while a stage holds the game: plain ASCII, cut to
+// the game's buffer, NUL-terminated.  The game draws it on its own thread.
+function armLabel() {
+    recv("label", function (msg) {
+        var target = stageLabel;
+        if (target !== null) {
+            var text = String(msg.text || "").replace(/[^\x20-\x7E]/g, "?");
+            if (text.length === 0) {
+                target.at.writeByteArray(target.saved);
+            } else {
+                target.at.writeAnsiString(text.substring(0, target.size - 1));
+            }
+        }
+        armLabel();
+    });
+}
+
 // Verdict helper: an integer the mod may have rewritten, clamped to int32.
 function asked(verdict, key, fallback) {
     var raw = verdict.set[key];
@@ -79,6 +151,9 @@ var COMMAND_LATER = {};
 
 function commandLater(name, prepare) {
     commands[name] = function (f, seq) {
+        if (stageHold > 0) {
+            throw new Error("Not available while the game loads.");
+        }
         var work = prepare(f);
         if (!later(function () {
             var out;
@@ -105,6 +180,9 @@ var engineJobs = [];
 
 function commandOnEngine(name, prepare) {
     commands[name] = function (f, seq) {
+        if (stageHold > 0) {
+            throw new Error("Not available while the game loads.");
+        }
         var work = prepare(f);
         if (engineJobs.length >= ENGINE_JOBS_MAX) {
             throw new Error("Too many game calls waiting.");
@@ -170,3 +248,4 @@ function armMode() {
 
 armMode();
 armCommands();
+armLabel();
