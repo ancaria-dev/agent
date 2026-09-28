@@ -151,6 +151,14 @@ function crashReport(details) {
                " at " + crashWhere(details.address) +
                ", thread " + Process.getCurrentThreadId() +
                ", loading " + (isLoading() ? "yes" : "no"));
+    if (typeof commandThread !== "undefined") {
+        lines.push("command thread " + commandThread + ", command " + commandInFlight +
+                   ", ask " + askInFlight);
+    }
+    var range = Process.findRangeByAddress(details.address);
+    lines.push("range: " + (range === null ? "unmapped"
+        : range.base + "+0x" + details.address.sub(range.base).toString(16) +
+          " " + range.protection + " size 0x" + range.size.toString(16)));
     if (details.memory) {
         lines.push("memory: " + details.memory.operation + " " + details.memory.address);
     }

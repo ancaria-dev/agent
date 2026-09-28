@@ -9,6 +9,11 @@
 var seqCounter = 1;
 var verdicts = {};
 var askEnabled = true;
+// What each side is doing, for the fault report in 10-core.js: the command
+// Frida's thread is running and the ask the game thread is parked in.
+var commandInFlight = null;
+var askInFlight = null;
+var commandThread = 0;
 
 function evt(name, fields) {
     send({ type: "evt", id: 0, result: name, returns: fields || {} });
@@ -33,6 +38,7 @@ function ask(name, fields) {
         return { cancel: false, set: {} };
     }
     var seq = seqCounter++;
+    askInFlight = name + " on thread " + Process.getCurrentThreadId();
     send({ type: "ask", id: seq, result: name, returns: fields || {} });
     while (verdicts[seq] === undefined) {
         var op = recv("verdict", function (msg) {
@@ -40,6 +46,7 @@ function ask(name, fields) {
         });
         op.wait();
     }
+    askInFlight = null;
     var verdict = verdicts[seq];
     delete verdicts[seq];
     return { cancel: verdict.cancel === true, set: verdict.set || {} };
@@ -222,6 +229,8 @@ function armCommands() {
         // and Coderpack's .get("gold") was null.  Nothing failed loudly: the callers
         // all had a fallback, so uiString() simply always returned null.
         var out;
+        commandThread = Process.getCurrentThreadId();
+        commandInFlight = msg.name;
         try {
             var fn = commands[msg.name];
             out = (fn === undefined)
@@ -230,6 +239,7 @@ function armCommands() {
         } catch (e) {
             out = { err: e.message };
         }
+        commandInFlight = null;
         if (out !== COMMAND_LATER) {
             reply(msg.seq, msg.name, out);
         }
