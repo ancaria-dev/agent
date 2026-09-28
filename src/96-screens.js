@@ -197,9 +197,11 @@ hook("uiEvent", RVA.uiEvent, {
     }
 });
 
-// receive_event's one epilogue: three pops, `add esp, 0x3E4`, `ret 4`.  Here
-// ESP is the entry's minus 0x3F0, which names the call a veto was made in.
-var SCREEN_EVENT_FRAME = 0x3F0;
+// receive_event's one epilogue, at `add esp, 0x3E4` right before `ret 4`,
+// past `mov ecx, [esp+0x3E4]`: relocated into Frida's trampoline, that load
+// crashed the game while loading.  Here ESP is the entry's minus 0x3E4, which
+// names the call a veto was made in.
+var SCREEN_EVENT_FRAME = 0x3E4;
 
 hook("uiEventReturn", RVA.uiEventReturn, function () {
     if (screenVetoes.length === 0) {
