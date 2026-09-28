@@ -84,10 +84,17 @@ var SCREEN_IGNORED = [
 // What onShow last said about each window.  Unknown means hidden: a close for
 // a window never seen open is the world load tidying up, not a screen closing.
 var screenVisible = {};
-var screenCommands = 0;
-// Inside armaPlay or armaStop the world is already coming or going, and a
-// refused window would be left over it.  Those moves are reported, not asked.
-var screenSettling = 0;
+// Running button commands and armaPlay or armaStop, as calls (see callOpen):
+// a window moved inside one is not asked about on its own.  Inside armaPlay or
+// armaStop the world is already coming or going, and a refused window would be
+// left over it.  A command's data is its main menu pages, reported once it is
+// over.
+var screenOuter = [];
+// Vetoed events, their calls holding { ev, id } until receive_event's
+// epilogue puts the id back.
+var screenVetoes = [];
+// Portal travels in progress, their calls holding the portal's id.
+var screenPortals = [];
 var screenPage = 0;
 var screenUi2 = null;
 // A command with nothing in it: its loop runs zero times.
@@ -156,10 +163,15 @@ function screenChange(ev, inCommand) {
     return open === visible ? null : { name: name, open: open };
 }
 
+// No onLeave here: with one, spending a skill point crashed the game in the
+// next onLeave on the thread, the way a call left by an exception does (see
+// callOpen).  A vetoed id is put back in the
+// epilogue below, which an exception simply skips.
 hook("uiEvent", RVA.uiEvent, {
     onEnter: function (args) {
+        callSweep(screenVetoes);
         // A button's events were decided as one click; see uiCommand.
-        if (screenCommands > 0 || screenSettling > 0) {
+        if (callInside(screenOuter, this.context)) {
             return;
         }
         var ev = args[0];
@@ -179,21 +191,37 @@ hook("uiEvent", RVA.uiEvent, {
         var verdict = ask(change.open ? "ui.show" : "ui.hide",
                           screenFields(change.name, change.open));
         if (verdict.cancel) {
-            this.vetoed = ev;
-            this.id = ev.add(4).readU32();
+            callOpen(screenVetoes, this.context, { ev: ev, id: ev.add(4).readU32() });
             ev.add(4).writeU32(SCREEN_NOTHING);
         }
-    },
-    onLeave: function () {
-        if (this.vetoed) {
-            this.vetoed.add(4).writeU32(this.id);
+    }
+});
+
+// receive_event's one epilogue: three pops, `add esp, 0x3E4`, `ret 4`.  Here
+// ESP is the entry's minus 0x3F0, which names the call a veto was made in.
+var SCREEN_EVENT_FRAME = 0x3F0;
+
+hook("uiEventReturn", RVA.uiEventReturn, function () {
+    if (screenVetoes.length === 0) {
+        return;
+    }
+    var tid = Process.getCurrentThreadId();
+    var entry = this.context.esp.add(SCREEN_EVENT_FRAME);
+    for (var i = 0; i < screenVetoes.length; i++) {
+        var call = screenVetoes[i];
+        if (call.tid === tid && call.at.equals(entry)) {
+            screenVetoes.splice(i, 1);
+            try {
+                call.data.ev.add(4).writeU32(call.data.id);
+            } catch (e) {}
+            return;
         }
     }
 });
 
 hook("uiCommand", RVA.uiCommand, {
     onEnter: function () {
-        screenCommands += 1;
+        var call = callOpen(screenOuter, this.context, []);
         var cmd = this.context.ecx;
         var changes = [];
         var page = null;
@@ -255,21 +283,21 @@ hook("uiCommand", RVA.uiCommand, {
         }
         // A page has no onShow of its own, so its end is reported once the
         // click has gone through.
-        this.pages = changes.filter(function (c) {
+        call.data = changes.filter(function (c) {
             return c.multiplayer;
         });
         if (page !== null) {
             screenPage = page;
         }
-    },
-    onLeave: function () {
-        screenCommands -= 1;
-        (this.pages || []).forEach(function (c) {
-            evt(c.open ? "ui.shown" : "ui.hidden",
-                { window: SCREEN_MAIN_MENU, page: SCREEN_MULTIPLAYER_PAGE });
-        });
     }
 });
+
+function screenPagesShown(pages) {
+    (pages || []).forEach(function (c) {
+        evt(c.open ? "ui.shown" : "ui.hidden",
+            { window: SCREEN_MAIN_MENU, page: SCREEN_MULTIPLAYER_PAGE });
+    });
+}
 
 hook("windowShow", RVA.windowShow, {
     onEnter: function (args) {
@@ -352,7 +380,7 @@ hook("busyReact", RVA.busyReact, {
             var portal = args[1].toInt32();
             verdict = ask("ui.portal", { id: portal, mode: listMode });
             if (!verdict.cancel) {
-                this.portal = portal;
+                callOpen(screenPortals, this.context, portal);
             }
         } else {
             return;
@@ -360,13 +388,20 @@ hook("busyReact", RVA.busyReact, {
         if (verdict.cancel) {
             args[0] = ptr(BUSY_NOTHING);
         }
-    },
-    onLeave: function () {
-        if (this.portal !== undefined) {
-            evt("ui.portal_used", { id: this.portal });
-        }
     }
 });
+
+// What a call left to report once it is over: the pages a command turned, the
+// portal a travel went through.  Checked on Frida's thread, which only reads
+// the stack slot, because the main menu has no tick.
+var SCREEN_SWEEP_MS = 50;
+
+setInterval(function () {
+    callSweep(screenOuter, screenPagesShown);
+    callSweep(screenPortals, function (portal) {
+        evt("ui.portal_used", { id: portal });
+    });
+}, SCREEN_SWEEP_MS);
 
 // Which portals the hero has opened: a mask on the hero, the one the game
 // saves as "portals[%x]".  Bit i is entry i of Ancaria's list, bit 14 + i
@@ -456,24 +491,14 @@ onHero(function () {
     portalLast = null;
 });
 
-hook("gameStart", RVA.gameStart, {
-    onEnter: function () {
-        screenSettling += 1;
-        evt("game.start", {});
-    },
-    onLeave: function () {
-        screenSettling -= 1;
-    }
+hook("gameStart", RVA.gameStart, function () {
+    callOpen(screenOuter, this.context, null);
+    evt("game.start", {});
 });
 
-hook("gameStop", RVA.gameStop, {
-    onEnter: function () {
-        screenSettling += 1;
-        evt("game.stop", {});
-    },
-    onLeave: function () {
-        screenSettling -= 1;
-    }
+hook("gameStop", RVA.gameStop, function () {
+    callOpen(screenOuter, this.context, null);
+    evt("game.stop", {});
 });
 
 // The hero select's start.  Action 1 starts a new hero and 7 one that already
