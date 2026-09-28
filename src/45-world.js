@@ -312,8 +312,41 @@ hook("areaKill", RVA.areaKill, {
 // when that module is loaded.
 var WORLD_HARDCORE = 0x5708;       // cStats flag 4
 
+// The world's pause: byte [timer+0], which only timer::setPaused writes.  The
+// Esc menu, the options, the save menu and the world map pause the world
+// when they open and resume it when they close, and so does P; the console,
+// the inventory and losing the focus in a window do not.  setPaused's entry
+// cannot be hooked (a 5-byte patch splits its test from its branch) and it
+// has thirty callers, so the flag is sampled.  A load pauses and resumes
+// the world too; that is not reported, and neither is anything outside one.
+var WORLD_PAUSED = 0x00;
+var worldPausedLast = null;
+
+function worldPaused() {
+    var timer = ptr(VA.timer).readPointer();
+    return timer.isNull() ? null : timer.add(WORLD_PAUSED).readU8() !== 0;
+}
+
+onSample(SAMPLE_FREQUENT, ["world.paused", "world.resumed"], function () {
+    if (isLoading() || !live(heroFull)) {
+        worldPausedLast = null;
+        return;
+    }
+    var now = worldPaused();
+    var before = worldPausedLast;
+    worldPausedLast = now;
+    if (now === null || before === null || now === before) {
+        return;
+    }
+    evt(now ? "world.paused" : "world.resumed", {});
+});
+
 command("world.state", function () {
     var out = { region: worldRegion };
+    var paused = worldPaused();
+    if (paused !== null) {
+        out.paused = paused ? 1 : 0;
+    }
     if (worldSector !== null) {
         out.sx = worldSector.x;
         out.sy = worldSector.y;
