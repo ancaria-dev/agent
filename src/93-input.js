@@ -26,6 +26,10 @@
 //   "mouse.wheel"    the wheel turned.
 //   "window.focus"   the game's window became active (1) or not (0).
 //
+//   input.down       whether a key (vk) or a mouse button (button, 1..5) is
+//                    held now, for a mod that polls: GetAsyncKeyState, and
+//                    never while another window is the active one.
+//
 // Asking stops the window's thread, not the engine's: the world keeps
 // running while a mod decides.  Keys the game polls with GetAsyncKeyState
 // (Shift and Ctrl for its attack modes, among others) are read past this
@@ -71,6 +75,12 @@ function inputNatives() {
         inputUser = {
             keyState: new NativeFunction(user32.getExportByName("GetKeyState"), "int16", ["int"],
                                          { abi: "stdcall" }),
+            asyncState: new NativeFunction(user32.getExportByName("GetAsyncKeyState"), "int16", ["int"],
+                                           { abi: "stdcall" }),
+            foreground: new NativeFunction(user32.getExportByName("GetForegroundWindow"), "pointer", [],
+                                           { abi: "stdcall" }),
+            metric: new NativeFunction(user32.getExportByName("GetSystemMetrics"), "int", ["int"],
+                                       { abi: "stdcall" }),
             unicode: new NativeFunction(user32.getExportByName("IsWindowUnicode"), "int", ["pointer"],
                                         { abi: "stdcall" }),
             layout: new NativeFunction(user32.getExportByName("GetKeyboardLayout"), "pointer", ["uint32"],
@@ -313,3 +323,31 @@ function inputProcedure(name, rva) {
 
 inputProcedure("wndProcWorld", RVA.wndProcWorld);
 inputProcedure("wndProcMenu", RVA.wndProcMenu);
+
+// Virtual-key codes of the mouse buttons, by the wire's button number.
+// GetAsyncKeyState reads the physical buttons, the window's messages the
+// logical ones, so a left-handed setup swaps the first two.
+var INPUT_BUTTON_KEYS = { 1: 0x01, 2: 0x02, 3: 0x04, 4: 0x05, 5: 0x06 };
+var INPUT_SWAPPED = 23;             // SM_SWAPBUTTON
+var INPUT_WINDOW = 0xB0;
+
+command("input.down", function (f) {
+    var vk;
+    if (f.button !== undefined) {
+        vk = INPUT_BUTTON_KEYS[parseInt(f.button, 10)];
+    } else {
+        vk = parseInt(f.vk, 10);
+    }
+    if (vk === undefined || isNaN(vk) || vk < 1 || vk > 0xFE) {
+        throw new Error("No key " + (f.vk || f.button) + ".");
+    }
+    var n = inputNatives();
+    if ((vk === 1 || vk === 2) && f.button !== undefined && n.metric(INPUT_SWAPPED) !== 0) {
+        vk = 3 - vk;
+    }
+    var driver = ptr(VA.dxDriver).readPointer();
+    if (driver.isNull() || !n.foreground().equals(driver.add(INPUT_WINDOW).readPointer())) {
+        return { down: 0, focused: 0 };
+    }
+    return { down: n.asyncState(vk) < 0 ? 1 : 0, focused: 1 };
+});
