@@ -12,6 +12,15 @@
 var worldRegion = 0;
 var worldSector = null;
 
+// Another world starts from nowhere: the first region entered after a load
+// must not name the last world's region as where the hero came from.
+hook("worldPlaceReset", RVA.worldLoad, {
+    onEnter: function () {
+        worldRegion = 0;
+        worldSector = null;
+    }
+});
+
 hook("regionEnter", RVA.regionEnter, {
     onEnter: function (args) {
         var id;
