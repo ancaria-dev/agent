@@ -118,6 +118,96 @@ function checkBuild() {
 
 checkBuild();
 
+// A native fault leaves no trace otherwise: pureHD dies with 0xC0000005, WER
+// records nothing, and the host log just stops.  This writes where it happened.
+//
+// The handler sees first-chance exceptions, and the game raises some it handles
+// itself (cCommand_exitGame does), so it only reports and returns false: the
+// game's own handlers still run, and a real crash stays a crash.  The report is
+// written to a file synchronously, because a message to the host may still be
+// queued when the process dies.  Capped, so a handled exception in a loop
+// cannot fill the disk.
+var CRASH_REPORTS_MAX = 8;
+var crashReports = 0;
+var CRASH_REGS = ["eip", "esp", "ebp", "eax", "ebx", "ecx", "edx", "esi", "edi"];
+
+function crashWhere(p) {
+    var m = Process.findModuleByAddress(p);
+    if (m === null) {
+        return p + " (no module)";
+    }
+    var rva = p.sub(m.base);
+    if (m.name === gameMod.name) {
+        return p + " " + m.name + "+0x" + rva.toString(16) +
+               " (VA 0x" + rva.add(0x400000).toString(16) + ")";
+    }
+    return p + " " + m.name + "+0x" + rva.toString(16);
+}
+
+function crashReport(details) {
+    var lines = [];
+    lines.push("=== " + new Date().toISOString() + " " + details.type +
+               " at " + crashWhere(details.address) +
+               ", thread " + Process.getCurrentThreadId() +
+               ", loading " + (isLoading() ? "yes" : "no"));
+    if (details.memory) {
+        lines.push("memory: " + details.memory.operation + " " + details.memory.address);
+    }
+    var ctx = details.context;
+    lines.push(CRASH_REGS.map(function (r) { return r + "=" + ctx[r]; }).join(" "));
+    try {
+        lines.push("code: " + hexdump(details.address, { length: 16, header: false, ansi: false }));
+    } catch (e) {
+        lines.push("code: unreadable");
+    }
+    try {
+        var stack = ptr(ctx.esp);
+        var words = [];
+        for (var i = 0; i < 16; i++) {
+            words.push(stack.add(i * 4).readPointer());
+        }
+        lines.push("stack: " + words.join(" "));
+    } catch (e) {
+        lines.push("stack: unreadable");
+    }
+    try {
+        Thread.backtrace(ctx, Backtracer.FUZZY).forEach(function (p) {
+            lines.push("  at " + crashWhere(p));
+        });
+    } catch (e) {
+        lines.push("  backtrace failed: " + e);
+    }
+    return lines.join("\n");
+}
+
+function crashLogPath() {
+    var dir = gameMod.path.substring(0, gameMod.path.lastIndexOf("\\"));
+    return dir + "\\launcher\\logs\\agent-crash.log";
+}
+
+if (typeof Process.setExceptionHandler === "function") {
+    Process.setExceptionHandler(function (details) {
+        if (crashReports >= CRASH_REPORTS_MAX) {
+            return false;
+        }
+        crashReports += 1;
+        var text;
+        try {
+            text = crashReport(details);
+        } catch (e) {
+            text = "=== " + details.type + " at " + details.address + " (report failed: " + e + ")";
+        }
+        try {
+            var f = new File(crashLogPath(), "ab");
+            f.write(text + "\n");
+            f.flush();
+            f.close();
+        } catch (e) {}
+        console.log(text);
+        return false;
+    });
+}
+
 var SHEET_EMBED = 0x3A8;
 var INT32_MAX = 2147483647;
 
