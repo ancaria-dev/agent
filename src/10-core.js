@@ -123,7 +123,8 @@ checkBuild();
 //
 // The handler sees first-chance exceptions, and the game raises some it handles
 // itself (cCommand_exitGame does), so it only reports and returns false: the
-// game's own handlers still run, and a real crash stays a crash.  The report is
+// game's own handlers still run, and a real crash stays a crash.  An access
+// violation outside a hook comes here as "access-violation".  The report is
 // written to a file synchronously, because a message to the host may still be
 // queued when the process dies.  Capped, so a handled exception in a loop
 // cannot fill the disk.
@@ -187,7 +188,11 @@ function crashLogPath() {
 
 if (typeof Process.setExceptionHandler === "function") {
     Process.setExceptionHandler(function (details) {
-        if (crashReports >= CRASH_REPORTS_MAX) {
+        // "system" is everything Frida has no name for, and at startup that
+        // means dxgi's C++ exceptions (0xE06D7363) and OutputDebugString
+        // (0x40010006): all handled, and enough of them to use up the cap
+        // before anything crashes.
+        if (details.type === "system" || crashReports >= CRASH_REPORTS_MAX) {
             return false;
         }
         crashReports += 1;
