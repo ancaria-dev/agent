@@ -31,6 +31,8 @@ function entityHp(sheet, next, kind, damage) {
     if (delta === 0 && kind !== "lethal") {
         return;
     }
+    // A site that does not name its kind is told by the direction of the change.
+    kind = kind || hpKind(delta);
     var payload = {
         type: e.typeId, name: e.name, level: e.level,
         prev: e.hp, next: next, max: e.maxHp,
@@ -61,7 +63,7 @@ function attachHp(name, rva, opts) {
         if (!isHeroSheet(sheet)) {
             // Same layout for every creature, so a hit on a mob is reported
             // rather than dropped.  This is what makes Player : Entity real.
-            entityHp(sheet, next, kind || hpKind(next), damage);
+            entityHp(sheet, next, kind, damage);
             return;
         }
 
