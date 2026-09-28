@@ -21,6 +21,11 @@
 var lastLevel = 0;
 
 onSample(SAMPLE_FREQUENT, ["level.changed"], function () {
+    // A half-loaded hero's level is not a starting point: read again after.
+    if (isLoading()) {
+        lastLevel = 0;
+        return;
+    }
     if (!live(heroFull)) {
         return;
     }

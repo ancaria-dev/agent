@@ -106,6 +106,11 @@ hook("goldDelta", RVA.goldDelta, {
 var lastGold = -1;
 
 onSample(SAMPLE_FREQUENT, ["gold.changed"], function () {
+    // A half-loaded hero's gold is not a starting point: read again after.
+    if (isLoading()) {
+        lastGold = -1;
+        return;
+    }
     if (!live(heroFull) || !live(heroSheet)) {
         return;
     }
