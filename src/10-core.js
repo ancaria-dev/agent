@@ -231,6 +231,16 @@ var heroListeners = [];
 // pointer happens to move.  The world load, not the hero's: heroLoad also runs
 // on every save, and a save is not a new hero.
 var heroPending = false;
+// The hero terminateHero just dropped.  getLocalHero keeps handing it out for
+// a while as the game tears it down, and capturing it again would start every
+// module over on a freed object.  Refused until the next load begins.
+var heroGone = null;
+
+function dropHero() {
+    heroGone = heroFull;
+    heroFull = null;
+    heroSheet = null;
+}
 
 function onHero(fn) {
     heroListeners.push(fn);
@@ -240,7 +250,7 @@ function onHero(fn) {
 }
 
 function noteHeroFull(full) {
-    if (!live(full) || !looksLikeHero(full)) {
+    if (!live(full) || same(full, heroGone) || !looksLikeHero(full)) {
         return false;
     }
     var changed = !isHeroFull(full) || (heroPending && !isLoading());
@@ -369,6 +379,7 @@ function whileLoading(name, rva, starting) {
         onEnter: function () {
             loading += 1;
             loadGeneration += 1;
+            heroGone = null;
             if (starting) {
                 starting();
             }

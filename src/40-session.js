@@ -27,8 +27,7 @@ hook("heroLoad", RVA.heroLoad, {
 hook("heroTerminate", RVA.heroTerminate, {
     onEnter: function () {
         evt("session.hero_terminated", {});
-        heroFull = null;
-        heroSheet = null;
+        dropHero();
     }
 });
 
