@@ -1,7 +1,17 @@
 // Experience.  EAX holds the new total, ESI the gain, EBX the sheet, so the
 // gain is recovered by subtraction and the total is what gets rewritten.
-// The game clamps the total to 0x9A31718F itself, but a boosted value can still
-// overflow int32 on the way there, so asked() caps it.
+// The total is unsigned: the game's own ceiling, 0x9A31718F, lies above
+// INT32_MAX, so it is read unsigned and a mod's answer is held to that
+// ceiling rather than to asked()'s int32 cap.
+var EXP_MAX = 0x9A31718F;
+
+function expAsked(verdict, fallback) {
+    var value = parseInt(verdict.set.next, 10);
+    if (isNaN(value)) {
+        return fallback;
+    }
+    return Math.max(0, Math.min(EXP_MAX, value));
+}
 
 hook("expWrite", RVA.expWrite, {
     onEnter: function () {
@@ -10,12 +20,12 @@ hook("expWrite", RVA.expWrite, {
         if (!isHeroSheet(ctx.ebx)) {
             return;
         }
-        var total = ctx.eax.toInt32();
+        var total = ctx.eax.toUInt32() >>> 0;
         var gain = ctx.esi.toInt32();
         var prev = total - gain;
 
         var verdict = ask("exp.gain", { gain: gain, prev: prev, next: total });
-        var next = verdict.cancel ? prev : asked(verdict, "next", total);
+        var next = verdict.cancel ? prev : expAsked(verdict, total);
         if (next !== total) {
             ctx.eax = ptr(next);
         }
