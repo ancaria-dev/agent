@@ -90,9 +90,9 @@ var screenVisible = {};
 // left over it.  A command's data is its main menu pages, reported once it is
 // over.
 var screenOuter = [];
-// Vetoed events, their calls holding { ev, id } until receive_event's
-// epilogue puts the id back.
+// Vetoed events and their real ids, newest last.  See uiEvent.
 var screenVetoes = [];
+var SCREEN_VETOES_KEPT = 16;
 // Portal travels in progress, their calls holding the portal's id.
 var screenPortals = [];
 var screenPage = 0;
@@ -163,13 +163,32 @@ function screenChange(ev, inCommand) {
     return open === visible ? null : { name: name, open: open };
 }
 
-// No onLeave here: with one, spending a skill point crashed the game in the
-// next onLeave on the thread, the way a call left by an exception does (see
-// callOpen).  A vetoed id is put back in the
-// epilogue below, which an exception simply skips.
+// A veto rewrites the event's id for good.  Not put back in an onLeave: with
+// one, spending a skill point crashed the game in the next onLeave on the
+// thread, the way a call left by an exception does (see callOpen).  Nor in the
+// epilogue, where every instruction moves the stack and the game crashed while
+// loading with a hook on either of two.  The events of loading, keys and
+// hotkeys are temporaries, one on its caller's stack, so writing to them later
+// could hit anything.  Only an event the game hands over again, still vetoed,
+// is known to be alive, and gets its id back before anything else.
+function screenRevive(ev) {
+    for (var i = screenVetoes.length - 1; i >= 0; i--) {
+        var veto = screenVetoes[i];
+        if (veto.ev.equals(ev)) {
+            screenVetoes.splice(i, 1);
+            if (ev.add(4).readU32() === SCREEN_NOTHING) {
+                ev.add(4).writeU32(veto.id);
+            }
+            return;
+        }
+    }
+}
+
 hook("uiEvent", RVA.uiEvent, {
     onEnter: function (args) {
-        callSweep(screenVetoes);
+        try {
+            screenRevive(args[0]);
+        } catch (e) {}
         // A button's events were decided as one click; see uiCommand.
         if (callInside(screenOuter, this.context)) {
             return;
@@ -191,32 +210,11 @@ hook("uiEvent", RVA.uiEvent, {
         var verdict = ask(change.open ? "ui.show" : "ui.hide",
                           screenFields(change.name, change.open));
         if (verdict.cancel) {
-            callOpen(screenVetoes, this.context, { ev: ev, id: ev.add(4).readU32() });
+            screenVetoes.push({ ev: snapPtr(ev), id: ev.add(4).readU32() });
+            if (screenVetoes.length > SCREEN_VETOES_KEPT) {
+                screenVetoes.shift();
+            }
             ev.add(4).writeU32(SCREEN_NOTHING);
-        }
-    }
-});
-
-// receive_event's one epilogue, at `add esp, 0x3E4` right before `ret 4`,
-// past `mov ecx, [esp+0x3E4]`: relocated into Frida's trampoline, that load
-// crashed the game while loading.  Here ESP is the entry's minus 0x3E4, which
-// names the call a veto was made in.
-var SCREEN_EVENT_FRAME = 0x3E4;
-
-hook("uiEventReturn", RVA.uiEventReturn, function () {
-    if (screenVetoes.length === 0) {
-        return;
-    }
-    var tid = Process.getCurrentThreadId();
-    var entry = this.context.esp.add(SCREEN_EVENT_FRAME);
-    for (var i = 0; i < screenVetoes.length; i++) {
-        var call = screenVetoes[i];
-        if (call.tid === tid && call.at.equals(entry)) {
-            screenVetoes.splice(i, 1);
-            try {
-                call.data.ev.add(4).writeU32(call.data.id);
-            } catch (e) {}
-            return;
         }
     }
 });
