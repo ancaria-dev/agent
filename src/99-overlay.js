@@ -12,7 +12,10 @@
 //   +28  ack          the last frame this side copied
 //   +32  x  +36 y     where, in the back buffer's pixels
 //   +40  z            order among layers, higher on top
-//   +44  flags        1 visible, 2 takes the mouse
+//   +44  flags        1 visible, 2 takes the mouse, 4 the world plane,
+//                     8 hides the game's cursor over it
+//   +48  focus        nonzero while the layer holds the keyboard; Java sets
+//                     it, this side clears it when the focus goes
 //   +64  two buffers of width * height premultiplied ARGB, 32 bits a pixel
 //
 // Java writes the buffer that is not front and then publishes; it waits only
@@ -22,10 +25,14 @@
 // The game never waits for Java: without a new frame the last one shows.
 //
 // The copy goes into a managed Direct3D 7 texture, drawn as one alpha-blended
-// quad at cEngine's cursor draw, pass 1 (0x00612160): above the world and
-// every window, under the cursor.  A frame without that pass (the main menu,
-// the load screen, a video) is drawn at flip in a scene of its own, over the
-// cursor there.  The texture is sampled bilinearly: a wrapper may render the
+// quad.  A layer of the top plane is drawn at cEngine's cursor draw, pass 1
+// (0x00612160): above the world and every window, under the cursor; the
+// menu thread's frames have no such pass, so there it is drawn as the cursor
+// is (mouse::draw, 0x006559D0), under it again.  A layer of the world plane
+// is drawn as cUI_Manager::render begins (0x00758BC0): above the world,
+// under the HUD and every window, which the manager draws together.  A frame
+// without these (the load screen, a video) draws the layers at flip in a
+// scene of its own.  The texture is sampled bilinearly: a wrapper may render the
 // frame at another size than the back buffer (dgVoodoo's forced resolution
 // drew it at 2560x1600 for a 1920x1080 window), and point sampling then broke
 // small text into steps.  The device calls are C in a CModule: TinyCC does not honour
@@ -37,12 +44,22 @@
 // or the wheel.  A press on a visible layer that takes the mouse is the
 // layer's, and so is everything up to that button's release; moves go to the
 // layer under the cursor and to the game as well, since the game draws the
-// cursor from them.
+// cursor from them.  The game's cursor is not drawn while it is over a
+// visible layer that hides it: mouse::draw draws nothing without a shape, so
+// the shape is cleared for that call and put back after it.
+//
+// The keyboard: a visible layer with its focus field set holds it, and
+// 93-input.js hands it every key and character instead of the game.  The
+// focus goes on Esc (the layer still hears that key), on a press anywhere
+// but that layer, when the layer hides or closes, and when the game's window
+// loses the focus.  Java sets the field; this side clears it and reports it.
 //
 //   "layer.press" / "layer.release" / "layer.click"   layer, x, y, button
 //   "layer.move"                                      layer, x, y
 //   "layer.wheel"                                     layer, x, y, delta
 //   "layer.leave"                                     layer
+//   "layer.focus_lost"                                layer
+//   (the keys themselves are sent by 93-input.js)
 //
 //   overlay.add     id, path: map a layer's file
 //   overlay.remove  id: drop it; its texture goes at the next frame
@@ -55,6 +72,11 @@ var OVERLAY_MAX = 16;
 var OVERLAY_SIDE_MAX = 4096;
 var OVERLAY_VISIBLE = 1;
 var OVERLAY_INPUT = 2;
+var OVERLAY_WORLD = 4;
+var OVERLAY_HIDES_CURSOR = 8;
+var OVERLAY_FOCUS = 48;
+var OVERLAY_MOUSE_X = 0x04;
+var OVERLAY_MOUSE_SHAPE = 0x64;
 var OVERLAY_STATE = 32;             // tex, texW, texH, lastSeq, failures
 
 var OVERLAY_C = [
@@ -167,7 +189,10 @@ var overlayCError = null;
 var overlayWin = null;
 var overlayViews = null;
 var overlayStates = null;
-var overlayDrawn = false;
+// Which of the frame's passes ran, since the last flip.
+var overlayPassTop = false;
+var overlayPassWorld = false;
+var overlayFocusLast = null;
 var overlayHover = null;
 var overlayCapture = null;
 var overlayCaptureButton = 0;
@@ -221,17 +246,20 @@ function overlayRead(layer, off) {
     return layer.view.add(off).readS32();
 }
 
-// Visible layers with a frame, bottom first.  None once the host stops asking,
-// which it does when the JVM that owns them is gone (and under --no-ask).
-function overlayShown() {
+// Visible layers with a frame, bottom first: of one plane when `world` is
+// true or false, of both when it is undefined.  None once the host stops
+// asking, which it does when the JVM that owns them is gone (and under
+// --no-ask).
+function overlayShown(world) {
     var shown = [];
     if (!askEnabled) {
         return shown;
     }
     for (var id in overlayLayers) {
         var layer = overlayLayers[id];
-        if (!layer.dead && (overlayRead(layer, 44) & OVERLAY_VISIBLE) !== 0 &&
-                overlayRead(layer, 16) !== 0) {
+        var flags = overlayRead(layer, 44);
+        if (!layer.dead && (flags & OVERLAY_VISIBLE) !== 0 && overlayRead(layer, 16) !== 0 &&
+                (world === undefined || ((flags & OVERLAY_WORLD) !== 0) === world)) {
             shown.push(layer);
         }
     }
@@ -259,12 +287,12 @@ function overlayCollect() {
     }
 }
 
-function overlayRender(driver) {
+function overlayRender(driver, world) {
     if (overlayC === null) {
         return;
     }
     overlayCollect();
-    var shown = overlayShown();
+    var shown = overlayShown(world);
     if (shown.length === 0) {
         return;
     }
@@ -276,6 +304,19 @@ function overlayRender(driver) {
                   overlayViews, overlayStates, shown.length);
 }
 
+// One plane inside a scene the game has begun.
+function overlayPass(world) {
+    if (!overlayAny()) {
+        return;
+    }
+    try {
+        var driver = ptr(VA.dxDriver).readPointer();
+        if (!driver.isNull()) {
+            overlayRender(driver, world);
+        }
+    } catch (e) {}
+}
+
 function overlayAny() {
     for (var id in overlayLayers) {
         return true;
@@ -283,16 +324,58 @@ function overlayAny() {
     return false;
 }
 
+hook("overlayDrawWorld", RVA.uiRender, {
+    onEnter: function () {
+        overlayPassWorld = true;
+        overlayPass(true);
+    }
+});
+
 hook("overlayDraw", RVA.cursorDraw, {
     onEnter: function (args) {
-        if (args[1].toUInt32() !== 1 || !overlayAny()) {
+        if (args[1].toUInt32() !== 1) {
+            return;
+        }
+        overlayPassTop = true;
+        overlayPass(false);
+    }
+});
+
+// The top plane in the menu thread's frames, and the cursor over a layer.
+hook("overlayCursor", RVA.cursorShapeDraw, {
+    onEnter: function () {
+        this.mouse = null;
+        if (!overlayAny()) {
+            return;
+        }
+        if (!overlayPassTop) {
+            overlayPassTop = true;
+            overlayPass(false);
+        }
+        try {
+            var mouse = snapPtr(this.context.ecx);
+            var x = mouse.add(OVERLAY_MOUSE_X).readS32();
+            var y = mouse.add(OVERLAY_MOUSE_X + 4).readS32();
+            if (overlayAt(x, y, OVERLAY_HIDES_CURSOR) === null) {
+                return;
+            }
+            var shape = mouse.add(OVERLAY_MOUSE_SHAPE).readPointer();
+            if (shape.isNull()) {
+                return;
+            }
+            mouse.add(OVERLAY_MOUSE_SHAPE).writePointer(NULL);
+            this.mouse = mouse;
+            this.shape = shape;
+        } catch (e) {}
+    },
+    onLeave: function () {
+        if (this.mouse === null) {
             return;
         }
         try {
-            var driver = ptr(VA.dxDriver).readPointer();
-            if (!driver.isNull()) {
-                overlayRender(driver);
-                overlayDrawn = true;
+            var slot = this.mouse.add(OVERLAY_MOUSE_SHAPE);
+            if (slot.readPointer().isNull()) {
+                slot.writePointer(this.shape);
             }
         } catch (e) {}
     }
@@ -300,20 +383,34 @@ hook("overlayDraw", RVA.cursorDraw, {
 
 hook("overlayFlip", RVA.frameFlip, {
     onEnter: function () {
-        var drawn = overlayDrawn;
-        overlayDrawn = false;
-        if (drawn || !overlayAny() || overlayC === null) {
+        var top = overlayPassTop;
+        var world = overlayPassWorld;
+        overlayPassTop = false;
+        overlayPassWorld = false;
+        if (!overlayAny() || overlayC === null) {
+            return;
+        }
+        try {
+            overlayFocusCheck();
+        } catch (e) {}
+        if (top && world) {
             return;
         }
         try {
             var driver = this.context.ecx;
             overlayCollect();
-            if (overlayShown().length === 0) {
+            var missing = top ? true : world ? false : undefined;
+            if (overlayShown(missing).length === 0) {
                 return;
             }
             overlayBegin(driver);
             try {
-                overlayRender(driver);
+                if (!world) {
+                    overlayRender(driver, true);
+                }
+                if (!top) {
+                    overlayRender(driver, false);
+                }
             } finally {
                 overlayEnd(driver);
             }
@@ -321,21 +418,78 @@ hook("overlayFlip", RVA.frameFlip, {
     }
 });
 
-// The topmost visible layer that takes the mouse at a point.
-function overlayHit(x, y) {
-    var shown = overlayShown();
-    for (var i = shown.length - 1; i >= 0; i--) {
-        var layer = shown[i];
-        if ((overlayRead(layer, 44) & OVERLAY_INPUT) === 0) {
-            continue;
-        }
-        var lx = overlayRead(layer, 32);
-        var ly = overlayRead(layer, 36);
-        if (x >= lx && y >= ly && x < lx + layer.width && y < ly + layer.height) {
-            return layer;
+// The topmost visible layer with a flag at a point, top plane first.
+function overlayAt(x, y, flag) {
+    var planes = [overlayShown(false), overlayShown(true)];
+    for (var p = 0; p < planes.length; p++) {
+        var shown = planes[p];
+        for (var i = shown.length - 1; i >= 0; i--) {
+            var layer = shown[i];
+            if ((overlayRead(layer, 44) & flag) === 0) {
+                continue;
+            }
+            var lx = overlayRead(layer, 32);
+            var ly = overlayRead(layer, 36);
+            if (x >= lx && y >= ly && x < lx + layer.width && y < ly + layer.height) {
+                return layer;
+            }
         }
     }
     return null;
+}
+
+// The topmost visible layer that takes the mouse at a point.
+function overlayHit(x, y) {
+    return overlayAt(x, y, OVERLAY_INPUT);
+}
+
+// The layer that holds the keyboard, or null: the newest visible one with
+// its focus field set.  Java keeps it to one.
+function overlayKeyboard() {
+    if (!askEnabled) {
+        return null;
+    }
+    var holder = null;
+    for (var id in overlayLayers) {
+        var layer = overlayLayers[id];
+        if (layer.dead || overlayRead(layer, OVERLAY_FOCUS) === 0 ||
+                (overlayRead(layer, 44) & OVERLAY_VISIBLE) === 0) {
+            continue;
+        }
+        if (holder === null || layer.id > holder.id) {
+            holder = layer;
+        }
+    }
+    return holder === null ? null : holder.id;
+}
+
+// Takes the keyboard from a layer; overlayFocusCheck reports it.
+function overlayLoseFocus(id) {
+    var layer = overlayLayers[id];
+    if (layer !== undefined && !layer.dead) {
+        layer.view.add(OVERLAY_FOCUS).writeS32(0);
+    }
+    overlayFocusCheck();
+}
+
+// Reports a layer that lost the keyboard since the last check: taken here,
+// hidden, closed, or given to another layer by Java.
+function overlayFocusCheck() {
+    for (var id in overlayLayers) {
+        var layer = overlayLayers[id];
+        if (!layer.dead && overlayRead(layer, OVERLAY_FOCUS) !== 0 &&
+                (overlayRead(layer, 44) & OVERLAY_VISIBLE) === 0) {
+            layer.view.add(OVERLAY_FOCUS).writeS32(0);
+        }
+    }
+    var now = overlayKeyboard();
+    if (now !== overlayFocusLast) {
+        var before = overlayFocusLast;
+        overlayFocusLast = now;
+        if (before !== null) {
+            evt("layer.focus_lost", { layer: before });
+        }
+    }
 }
 
 function overlayFields(layer, x, y) {
@@ -358,6 +512,10 @@ function overlayPointer(kind, button, x, y, delta, mods) {
     if (kind === "leave") {
         overlayLeave();
         overlayCapture = null;
+        var holding = overlayKeyboard();
+        if (holding !== null) {
+            overlayLoseFocus(holding);
+        }
         return false;
     }
     var captured = overlayCapture !== null ? overlayLayers[overlayCapture] : undefined;
@@ -381,6 +539,12 @@ function overlayPointer(kind, button, x, y, delta, mods) {
         return true;
     }
     var target = captured !== undefined ? captured : overlayHit(x, y);
+    if (kind === "press") {
+        var focused = overlayKeyboard();
+        if (focused !== null && (target === null || target.id !== focused)) {
+            overlayLoseFocus(focused);
+        }
+    }
     if (kind === "move") {
         var id = target === null ? null : target.id;
         if (id !== overlayHover) {
@@ -483,6 +647,10 @@ command("overlay.remove", function (f) {
     layer.dead = true;
     if (overlayHover === layer.id) {
         overlayHover = null;
+    }
+    if (overlayFocusLast === layer.id) {
+        overlayFocusLast = null;
+        evt("layer.focus_lost", { layer: layer.id });
     }
     return { removed: 1 };
 });
