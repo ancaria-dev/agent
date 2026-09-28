@@ -1,8 +1,8 @@
 // The world's script spots: hiding places, wells, shrines, gold spots and
 // signposts, one 0x58-byte record each in the interpreter's vector (see the
 // scriptSpots row).  They are not objects: a hiding place's sparkle is a bit
-// of the world tile it lies on.  The hidden quest triggers (setvar_*) share
-// the vector and are never reported, because running one changes a quest.
+// of the world tile it lies on.  The gravestones (setvar_*) share the vector
+// and are left to 48-graves.js: running one asks the player to open a grave.
 //
 //   world.spots        every visible spot, packed
 //   world.spot_open    a hiding place, opened the way the hero's click does
