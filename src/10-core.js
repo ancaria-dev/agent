@@ -358,11 +358,16 @@ function replaced(name, rva, ret, argTypes, make, abi) {
 }
 
 var loading = 0;
+// Loads begun so far, for the samplers that must notice one they never saw.
+var loadGeneration = 0;
+// True only while the samplers catch up on such a load.
+var loadEcho = false;
 
 function whileLoading(name, rva, starting) {
     hook(name, rva, {
         onEnter: function () {
             loading += 1;
+            loadGeneration += 1;
             if (starting) {
                 starting();
             }
@@ -381,7 +386,7 @@ whileLoading("loadWindowHero", RVA.heroLoad, function () {
 });
 
 function isLoading() {
-    return loading > 0;
+    return loading > 0 || loadEcho;
 }
 
 // getLocalHero runs constantly and is the one hot site that has always been
@@ -435,6 +440,7 @@ var sampleFrameCount = 0;
 var sampleFrameSeen = false;
 var sampleLastFrame = -1;
 var sampleWasLoading = false;
+var sampleGeneration = 0;
 var nowClock = null;
 var sampleReported = 0;
 
@@ -535,11 +541,28 @@ onTick(function () {
     }
     // Without frameFlip (its module skipped) a frame is taken as 16 ms.
     var frame = sampleFrameSeen ? sampleFrameCount : Math.floor(Date.now() / 16);
-    var loading = isLoading();
+    var nowLoading = isLoading();
+    // A load that began and ended between two ticks was never seen loading.
+    // Everyone then runs once as if it still were, starts over, and takes the
+    // new world as its baseline on the next frame.
+    var missed = loadGeneration !== sampleGeneration && !nowLoading && !sampleWasLoading;
+    sampleGeneration = loadGeneration;
+    if (missed) {
+        sampleLastFrame = frame;
+        loadEcho = true;
+        try {
+            for (var m = 0; m < samplers.length; m++) {
+                sampleRun(samplers[m]);
+            }
+        } finally {
+            loadEcho = false;
+        }
+        return;
+    }
     // Entering or leaving a load runs everyone once, so each sampler sees the
     // load and starts over, whatever frame it falls on.
-    var all = loading !== sampleWasLoading;
-    sampleWasLoading = loading;
+    var all = nowLoading !== sampleWasLoading;
+    sampleWasLoading = nowLoading;
     if (frame === sampleLastFrame && !all) {
         return;
     }
