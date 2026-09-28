@@ -146,12 +146,18 @@ hook("maxHpCommit", RVA.commitStats, {
         }
         try {
             var maxHp = heroSheet.add(HP_MAX).readU32() >>> 0;
-            if (maxHp !== lastMaxHp) {
+            // The first commit for a hero is where it already stands; the Hero
+            // event carries that.  Only a later one is a change.
+            if (lastMaxHp !== 0 && maxHp !== lastMaxHp) {
                 evt("health.max_changed", { prev: lastMaxHp, next: maxHp });
-                lastMaxHp = maxHp;
             }
+            lastMaxHp = maxHp;
         } catch (e) {}
     }
+});
+
+onHero(function () {
+    lastMaxHp = 0;
 });
 
 // Regeneration.  The write (+0x162D10) is not a site: EDX and ECX are loaded
