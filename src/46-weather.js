@@ -124,6 +124,7 @@ var weatherOwn = {};
 onSample(SAMPLE_FREQUENT, ["weather.change", "weather.changed"], function () {
     if (isLoading()) {
         weatherLast = null;
+        weatherOwn = {};
         return;
     }
     var now;
@@ -134,6 +135,7 @@ onSample(SAMPLE_FREQUENT, ["weather.change", "weather.changed"], function () {
     }
     if (now === null) {
         weatherLast = null;
+        weatherOwn = {};
         return;
     }
     var before = weatherLast;
@@ -167,6 +169,9 @@ onSample(SAMPLE_FREQUENT, ["weather.change", "weather.changed"], function () {
     }
 });
 
+// A switch a mod asked for before a load or with no weather is never seen,
+// so it must not keep the next natural change from being asked about.
 onHero(function () {
     weatherLast = null;
+    weatherOwn = {};
 });
