@@ -502,16 +502,22 @@ function callRunning(call) {
     }
 }
 
+// Ended calls are handed over oldest first, the order they started in.
 function callSweep(calls, ended) {
-    for (var i = calls.length - 1; i >= 0; i--) {
+    var gone = [];
+    for (var i = 0; i < calls.length; i++) {
         if (!callRunning(calls[i])) {
-            var gone = calls.splice(i, 1)[0];
-            if (ended) {
-                try {
-                    ended(gone.data);
-                } catch (e) {}
-            }
+            gone.push(calls[i]);
+            calls.splice(i, 1);
+            i -= 1;
         }
+    }
+    if (ended) {
+        gone.forEach(function (call) {
+            try {
+                ended(call.data);
+            } catch (e) {}
+        });
     }
 }
 
