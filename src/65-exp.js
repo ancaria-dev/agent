@@ -18,7 +18,9 @@ var EXP_TOTAL_AT = 0x0C;
 var EXP_SWEEP_MS = 50;
 
 // Gains in progress, as calls (see callOpen), each holding the sheet and the
-// total before it.
+// totals before and after it.  The total after is worked out here, the way the
+// game adds and caps, because gains can follow each other within one check:
+// a quest reward right after a kill is two in a row.
 var expCalls = [];
 
 function expAsked(verdict, fallback) {
@@ -50,16 +52,19 @@ hook("expGain", RVA.addExperience, function (args) {
     var verdict = ask("exp.gain", { gain: gain, prev: prev, next: total });
     var next = verdict.cancel ? prev : Math.max(prev, expAsked(verdict, total));
     if (next !== total) {
-        args[0] = ptr(Math.min(INT32_MAX, next - prev));
+        var amount = Math.min(INT32_MAX, next - prev);
+        args[0] = ptr(amount);
+        next = Math.min(EXP_MAX, prev + amount);
     }
-    callOpen(expCalls, this.context, { sheet: sheet, prev: prev });
+    callOpen(expCalls, this.context, { sheet: sheet, prev: prev, next: next });
 });
 
 setInterval(function () {
     callSweep(expCalls, function (gain) {
+        // Only a gain that landed: a call the game left early wrote nothing.
         var now = gain.sheet.add(EXP_TOTAL_AT).readU32() >>> 0;
-        if (now !== gain.prev) {
-            evt("exp.changed", { prev: gain.prev, next: now });
+        if (gain.next !== gain.prev && now >= gain.next) {
+            evt("exp.changed", { prev: gain.prev, next: gain.next });
         }
     });
 }, EXP_SWEEP_MS);
