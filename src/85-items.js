@@ -538,8 +538,9 @@ hook("itemEquip", RVA.itemEquip, {
     }
 });
 
-// thiscall(inventory)(u16 src, u16 dst): grid slots, no item identity on this
-// path.  Kept because it is the only signal that the player rearranged a bag.
+// thiscall(inventory)(u16 src, u16 dst): two inventory entry indices, not grid
+// slots (see the itemMove row), and no item identity on this path.  Moving an
+// item within one bag does not come through here.
 hook("itemMove", RVA.itemMove, {
     onEnter: function (args) {
         try {
