@@ -18,7 +18,8 @@
 //
 // A quickload builds no engine: cEngine::load with flag 0 runs on the engine
 // thread.  It counts as leaving one world and building the next, so its entry
-// sends Leave, Gone and Begin, and its return Terrain and Ready.
+// sends Leave, Gone, Begin and Terrain, and its return Ready.  The same holds
+// for a save loaded from the menu inside a world: that is this path too.
 
 // The step each progress label starts, and the stage that is then complete.
 var STAGE_AFTER = {
@@ -108,17 +109,21 @@ hook("stageQuickload", RVA.loadGame, {
     onEnter: function (args) {
         // Flag 1 is the constructor's own load, part of a build.
         stageQuickload = stageBuilding === null && args[1].toInt32() === 0 && stageInWorld;
+        // Terrain here, before the load, as a build reaches it before its own
+        // load: the save's hero and objects arrive after it either way, so a
+        // World:Terrain mod hears the new hero's events on both paths.  The
+        // static world is the same one; only what stands in it is replaced.
         if (stageQuickload) {
             stagePostWorld = false;
             stage("World:Leave", {});
             stageNotice("World:Gone", {});
             stage("World:Begin", {});
+            stage("World:Terrain", {});
         }
     },
     onLeave: function () {
         if (stageQuickload) {
             stageQuickload = false;
-            stage("World:Terrain", {});
             stage("World:Ready", {});
             stagePostWorld = true;
         }
