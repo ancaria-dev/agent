@@ -57,6 +57,8 @@
     "uiCommand": "56578bf933f68b47",
     "uiEvent": "64a1000000006aff",
     "uiRender": "64a1000000006aff",
+    "videoOpen": "8b44240c81ec0c02",
+    "videoPlay": "6aff68c829870064",
     "windowShow": "64a1000000006aff",
     "wndProcMenu": "64a1000000006aff",
     "wndProcWorld": "64a1000000006aff",
