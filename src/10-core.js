@@ -202,9 +202,24 @@ function crashReport(details) {
     return lines.join("\n");
 }
 
+// One file per run, named when its first report is written, the way the
+// launcher names its logs: a crash ends the run, so each crash gets its own.
+var crashLogFile = null;
+
+function crashTwo(n) {
+    return (n < 10 ? "0" : "") + n;
+}
+
 function crashLogPath() {
-    var dir = gameMod.path.substring(0, gameMod.path.lastIndexOf("\\"));
-    return dir + "\\launcher\\logs\\agent-crash.log";
+    if (crashLogFile === null) {
+        var d = new Date();
+        var dir = gameMod.path.substring(0, gameMod.path.lastIndexOf("\\"));
+        crashLogFile = dir + "\\launcher\\logs\\agent-crash-" + d.getFullYear() + "-" +
+            crashTwo(d.getMonth() + 1) + "-" + crashTwo(d.getDate()) + "_" +
+            crashTwo(d.getHours()) + "-" + crashTwo(d.getMinutes()) + "-" +
+            crashTwo(d.getSeconds()) + ".log";
+    }
+    return crashLogFile;
 }
 
 if (typeof Process.setExceptionHandler === "function") {
