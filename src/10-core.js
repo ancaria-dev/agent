@@ -225,6 +225,11 @@ function looksLikeHero(full) {
 }
 
 var heroListeners = [];
+// Set when a hero starts loading.  The next capture after the load is a new
+// hero even at the same address, which the allocator readily hands out again,
+// so every module's baseline starts over on each load, not only when the
+// pointer happens to move.
+var heroPending = false;
 
 function onHero(fn) {
     heroListeners.push(fn);
@@ -237,10 +242,13 @@ function noteHeroFull(full) {
     if (!live(full) || !looksLikeHero(full)) {
         return false;
     }
-    var changed = !isHeroFull(full);
+    var changed = !isHeroFull(full) || (heroPending && !isLoading());
     heroFull = snapPtr(full);
     heroSheet = snapPtr(full.add(SHEET_EMBED));
     if (changed) {
+        if (!isLoading()) {
+            heroPending = false;
+        }
         for (var i = 0; i < heroListeners.length; i++) {
             try { heroListeners[i](heroFull, heroSheet); } catch (e) {}
         }
@@ -351,10 +359,13 @@ function replaced(name, rva, ret, argTypes, make, abi) {
 
 var loading = 0;
 
-function whileLoading(name, rva) {
+function whileLoading(name, rva, starting) {
     hook(name, rva, {
         onEnter: function () {
             loading += 1;
+            if (starting) {
+                starting();
+            }
         },
         onLeave: function () {
             // Attaching in the middle of a load would otherwise leave this
@@ -365,7 +376,9 @@ function whileLoading(name, rva) {
 }
 
 whileLoading("loadWindowWorld", RVA.worldLoad);
-whileLoading("loadWindowHero", RVA.heroLoad);
+whileLoading("loadWindowHero", RVA.heroLoad, function () {
+    heroPending = true;
+});
 
 function isLoading() {
     return loading > 0;
@@ -569,7 +582,7 @@ onTick(function () {
 
 hook("heroCapture", RVA.getLocalHero, {
     onLeave: function (retval) {
-        if (!retval.isNull() && !isHeroFull(retval)) {
+        if (!retval.isNull() && (heroPending || !isHeroFull(retval))) {
             noteHeroFull(retval);
         }
         for (var i = 0; i < tickListeners.length; i++) {
