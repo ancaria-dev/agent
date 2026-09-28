@@ -155,10 +155,23 @@ function crashReport(details) {
         lines.push("command thread " + commandThread + ", command " + commandInFlight +
                    ", ask " + askInFlight);
     }
+    try {
+        var self = Process.getCurrentThreadId();
+        Process.enumerateThreads().forEach(function (t) {
+            if (t.id === self) {
+                lines.push("thread name " + (t.name || "none") + ", starts at " +
+                           (t.entrypoint ? crashWhere(t.entrypoint.routine) +
+                                           " with " + t.entrypoint.parameter : "unknown"));
+            }
+        });
+    } catch (e) {
+        lines.push("thread: " + e);
+    }
     var range = Process.findRangeByAddress(details.address);
     lines.push("range: " + (range === null ? "unmapped"
         : range.base + "+0x" + details.address.sub(range.base).toString(16) +
-          " " + range.protection + " size 0x" + range.size.toString(16)));
+          " " + range.protection + " size 0x" + range.size.toString(16) +
+          (range.file ? " " + range.file.path : "")));
     if (details.memory) {
         lines.push("memory: " + details.memory.operation + " " + details.memory.address);
     }
