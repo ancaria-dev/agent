@@ -60,20 +60,23 @@ command("player.stats", function () {
     };
 });
 
-// Mid-function, inside the kill recorder: `mov [ebp+0x56F0], eax` with EAX
-// already incremented.  EBX still holds the recorder's first argument, the
-// victim's type, and [esp+0x2C] its third, which the game keeps as a
-// per-type maximum.  That one is sent raw as `a2` until it is confirmed to be
-// the victim's level.  onEnter only: this is not a function entry.
-hook("killCount", RVA.killCount, function () {
-    var ctx = this.context;
+// The kill recorder's entry, `this` = cStats.  Its first argument is the
+// victim's type, and its third the value the game keeps as a per-type maximum,
+// sent raw as `a2` until it is confirmed to be the victim's level.  Every call
+// reaches the counter, which it raises by one unless it is at INT32_MAX.
+// Not at the counter's write itself: an interceptor there, even an empty one,
+// made every kill grant 74063647 experience.
+var KILLS_MAX = 0x7FFFFFFF;
+
+hook("recordKill", RVA.recordKill, function (args) {
     try {
-        var type = ctx.ebx.toUInt32() >>> 0;
+        var type = args[0].toUInt32() >>> 0;
+        var kills = this.context.ecx.add(JOURNAL.kills).readU32() >>> 0;
         evt("journal.kill", {
-            total: ctx.eax.toUInt32() >>> 0,
+            total: kills === KILLS_MAX ? kills : kills + 1,
             type: type,
             name: typeName(type),
-            a2: ctx.esp.add(0x2C).readU16()
+            a2: args[2].toUInt32() & 0xFFFF
         });
     } catch (e) {}
 });
