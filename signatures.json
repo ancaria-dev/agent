@@ -3,6 +3,7 @@
   "exe": "pureHD.exe",
   "version": "2.0.2.118",
   "sig": {
+    "addExperience": "558bec6aff68e575",
     "areaKill": "64a1000000006aff",
     "artRaise": "88580680480801eb",
     "busyReact": "64a1000000006aff",
@@ -18,7 +19,6 @@
     "engineBuild": "6aff68a5d5860064",
     "engineDestroy": "8b0d785ead0085c9",
     "exitGame": "68f4b49e00e8c68f",
-    "expWrite": "89430c0f8e990000",
     "fillScript": "51535556578b7c24",
     "frameFlip": "83ec7c5355568bf1",
     "gameStart": "568bf1668b460466",
