@@ -210,14 +210,19 @@ function crashTwo(n) {
     return (n < 10 ? "0" : "") + n;
 }
 
+// Windows' local time, not JavaScript's: this runtime's Date has no daylight
+// saving, and the name has to match the launcher's logs beside it.
 function crashLogPath() {
     if (crashLogFile === null) {
-        var d = new Date();
+        var st = Memory.alloc(16);
+        new NativeFunction(Process.getModuleByName("kernel32.dll").getExportByName("GetLocalTime"),
+                           "void", ["pointer"], { abi: "stdcall" })(st);
+        var part = function (i) {
+            return crashTwo(st.add(2 * i).readU16());
+        };
         var dir = gameMod.path.substring(0, gameMod.path.lastIndexOf("\\"));
-        crashLogFile = dir + "\\launcher\\logs\\agent-crash-" + d.getFullYear() + "-" +
-            crashTwo(d.getMonth() + 1) + "-" + crashTwo(d.getDate()) + "_" +
-            crashTwo(d.getHours()) + "-" + crashTwo(d.getMinutes()) + "-" +
-            crashTwo(d.getSeconds()) + ".log";
+        crashLogFile = dir + "\\launcher\\logs\\agent-crash-" + st.readU16() + "-" + part(1) +
+            "-" + part(3) + "_" + part(4) + "-" + part(5) + "-" + part(6) + ".log";
     }
     return crashLogFile;
 }
