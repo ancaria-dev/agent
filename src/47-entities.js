@@ -24,6 +24,10 @@ var lootDropping = null;
 // Other switchable hooks that read what objCreate collects, switched with it.
 var spawnFollowers = [];
 
+// Functions told of every object made in play, with objCreate's context, so a
+// module can tell which of its calls in progress made it (see callOpen).
+var createWatchers = [];
+
 var spawnHook = switchable("objCreate", RVA.objCreate, {
     // create(type, ref, ...) returns the ref it made.  The first argument is
     // the type and the second the ref to restore, 0 for a new object: seen
@@ -37,6 +41,11 @@ var spawnHook = switchable("objCreate", RVA.objCreate, {
         }
         if (lootDropping !== null) {
             lootDropping.push(ref);
+        }
+        for (var i = 0; i < createWatchers.length; i++) {
+            try {
+                createWatchers[i](ref, this.context);
+            } catch (e) {}
         }
         var fields = creatureFields(ref);
         if (fields !== null) {
