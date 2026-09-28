@@ -65,6 +65,7 @@
     "windowShow": "64a1000000006aff",
     "wndProcMenu": "64a1000000006aff",
     "wndProcWorld": "64a1000000006aff",
+    "worldBuild": "6aff682ef1860064",
     "worldLoad": "6aff686ecf860064"
   }
 }
