@@ -457,6 +457,60 @@ function switchable(name, rva, callbacks) {
     };
 }
 
+// Calls still running, for hooks that must know "inside" without an onLeave.
+// An onLeave makes Frida swap the return address and keep a return stack per
+// thread, and a function the game leaves by an exception never pops it: the
+// next onLeave on that thread returns into the heap.  With an onLeave on
+// cUI_Manager::receive_event, spending a skill point crashed the game in
+// cDxDriver7::flip's onLeave.
+//
+// callOpen notes a call at a function entry: the thread, ESP and the return
+// address in [esp].  The call runs while that slot still holds it, because the
+// callee's frames all lie below.  Once it is over, returned or unwound, the
+// caller's next call writes its own return address there.  Records are dropped
+// as they end, and `ended` gets each one's data.
+function callOpen(calls, ctx, data) {
+    var at = snapPtr(ctx.esp);
+    var call = { tid: Process.getCurrentThreadId(), at: at, ret: at.readPointer(), data: data };
+    calls.push(call);
+    return call;
+}
+
+function callRunning(call) {
+    try {
+        return call.at.readPointer().equals(call.ret);
+    } catch (e) {
+        return false;
+    }
+}
+
+function callSweep(calls, ended) {
+    for (var i = calls.length - 1; i >= 0; i--) {
+        if (!callRunning(calls[i])) {
+            var gone = calls.splice(i, 1)[0];
+            if (ended) {
+                try {
+                    ended(gone.data);
+                } catch (e) {}
+            }
+        }
+    }
+}
+
+// Is the current thread inside one of these calls?  `ctx` is the context of a
+// hook deeper in the same stack.
+function callInside(calls, ctx) {
+    var tid = Process.getCurrentThreadId();
+    var esp = ctx.esp;
+    for (var i = 0; i < calls.length; i++) {
+        var call = calls[i];
+        if (call.tid === tid && call.at.compare(esp) > 0 && callRunning(call)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // A site that reads neither `this` nor an argument cannot be stopped from
 // onEnter: there is nothing to rewrite.  Replacing the function is the only
 // veto, and `make` gets the original to call when the answer is yes.
