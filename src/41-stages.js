@@ -57,9 +57,12 @@ function stageAt(point, label) {
 
 hook("loadProgress", RVA.loadProgress, {
     onEnter: function (args) {
+        // To the NUL: the labels are the game's own string constants.  A size
+        // here is not a limit but a length, and read the bytes after the NUL
+        // as well, so no label ever matched.
         var text = null;
         try {
-            text = args[1].readCString(32);
+            text = args[1].readCString();
         } catch (e) {
             return;
         }
