@@ -377,10 +377,22 @@ function inputMessage(hwnd, msg, wParam, lParam) {
     return true;
 }
 
+var INPUT_MOVE = 0x03;
+var INPUT_SIZE = 0x05;
+
 function inputProcedure(name, rva) {
     hook(name, rva, {
         onEnter: function (args) {
             var msg = args[1].toUInt32();
+            if (msg === INPUT_MOVE || msg === INPUT_SIZE) {
+                // The window's own moves are 98-native.js's; the game ignores them.
+                if (typeof nativeWindowMessage === "function") {
+                    try {
+                        nativeWindowMessage(msg, args[2].toUInt32(), args[3].toUInt32());
+                    } catch (e) {}
+                }
+                return;
+            }
             if (msg === 0 || (msg !== INPUT_ACTIVATEAPP && (msg < INPUT_KEYDOWN || msg > 0x20D))) {
                 return;
             }

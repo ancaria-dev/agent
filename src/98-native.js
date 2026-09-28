@@ -21,6 +21,13 @@
 //                            succeeds again
 //   "engine.thread_started"  the render or menu thread came, or went
 //   "engine.thread_ended"    (role, id)
+//   "window.moved"           x, y: the client area's top left on the screen
+//   "window.resized"         width, height of the client area
+//   "window.minimized" / "window.restored"
+//
+// The game handles neither WM_MOVE nor WM_SIZE: its back buffer keeps its
+// size and a window flip blits into the rectangle it computed at start-up.
+// 93-input.js hands both messages here from the window procedures.
 //
 //   native.info              everything above, read now, and the seconds
 //                            the engine's last frame moved the world
@@ -57,6 +64,31 @@ var NATIVE_SLOW_MS = 1000;
 // The shortest gap between two "engine.frames", in microseconds.
 var NATIVE_FRAMES_GAP_US = 1000;
 
+var NATIVE_SIZE_MINIMIZED = 1;
+var nativeMinimized = false;
+
+function nativeLowWord(v) {
+    var w = v & 0xFFFF;
+    return w >= 0x8000 ? w - 0x10000 : w;
+}
+
+function nativeWindowMessage(msg, wParam, lParam) {
+    if (msg === 0x03) {
+        if (!nativeMinimized) {
+            evt("window.moved", { x: nativeLowWord(lParam), y: nativeLowWord(lParam >>> 16) });
+        }
+        return;
+    }
+    var minimized = wParam === NATIVE_SIZE_MINIMIZED;
+    if (minimized !== nativeMinimized) {
+        nativeMinimized = minimized;
+        evt(minimized ? "window.minimized" : "window.restored", {});
+    }
+    if (!minimized) {
+        evt("window.resized", { width: lParam & 0xFFFF, height: (lParam >>> 16) & 0xFFFF });
+    }
+}
+
 var nativeFrames = 0;
 var nativeLost = false;
 var nativeWin = null;
@@ -76,6 +108,15 @@ function nativeNatives() {
                                            { abi: "stdcall" }),
             clientRect: new NativeFunction(user32.getExportByName("GetClientRect"), "int",
                                            ["pointer", "pointer"], { abi: "stdcall" }),
+            windowRect: new NativeFunction(user32.getExportByName("GetWindowRect"), "int",
+                                           ["pointer", "pointer"], { abi: "stdcall" }),
+            toScreen: new NativeFunction(user32.getExportByName("ClientToScreen"), "int",
+                                         ["pointer", "pointer"], { abi: "stdcall" }),
+            iconic: new NativeFunction(user32.getExportByName("IsIconic"), "int", ["pointer"],
+                                       { abi: "stdcall" }),
+            title: new NativeFunction(user32.getExportByName("GetWindowTextW"), "int",
+                                      ["pointer", "pointer", "int"], { abi: "stdcall" }),
+            text: Memory.alloc(512),
             monitor: new NativeFunction(user32.getExportByName("MonitorFromWindow"), "pointer",
                                         ["pointer", "uint32"], { abi: "stdcall" }),
             monitorInfo: new NativeFunction(user32.getExportByName("GetMonitorInfoW"), "int",
@@ -278,6 +319,21 @@ command("native.info", function () {
             out.clientWidth = n.out.add(8).readS32();
             out.clientHeight = n.out.add(12).readS32();
         }
+        n.out.writeS32(0);
+        n.out.add(4).writeS32(0);
+        if (n.toScreen(hwnd, n.out) !== 0) {
+            out.clientX = n.out.readS32();
+            out.clientY = n.out.add(4).readS32();
+        }
+        if (n.windowRect(hwnd, n.out) !== 0) {
+            out.windowX = n.out.readS32();
+            out.windowY = n.out.add(4).readS32();
+            out.windowWidth = n.out.add(8).readS32() - out.windowX;
+            out.windowHeight = n.out.add(12).readS32() - out.windowY;
+        }
+        out.minimized = n.iconic(hwnd) !== 0 ? 1 : 0;
+        var length = n.title(hwnd, n.text, 256);
+        out.title = length > 0 ? n.text.readUtf16String(length) : "";
     }
     return out;
 });
