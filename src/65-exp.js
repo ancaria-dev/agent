@@ -19,18 +19,10 @@ hook("expWrite", RVA.expWrite, {
         if (next !== total) {
             ctx.eax = ptr(next);
         }
-        this.sheet = snapPtr(ctx.ebx);
-        this.prev = prev;
-    },
-    onLeave: function () {
-        if (!this.sheet) {
-            return;
-        }
-        try {
-            evt("exp.changed", {
-                prev: this.prev,
-                next: this.sheet.add(0x0C).readU32() >>> 0
-            });
-        } catch (e) {}
+        // The site is the store itself (`mov [ebx+0x0C], eax`), so what EAX
+        // holds now is what the game writes.  No onLeave: this is the middle of
+        // addExperience, where [esp] is not a return address and Frida's
+        // return trampoline would overwrite a local.
+        evt("exp.changed", { prev: prev, next: next });
     }
 });
