@@ -225,10 +225,11 @@ function looksLikeHero(full) {
 }
 
 var heroListeners = [];
-// Set when a hero starts loading.  The next capture after the load is a new
+// Set when a world starts loading.  The next capture after the load is a new
 // hero even at the same address, which the allocator readily hands out again,
 // so every module's baseline starts over on each load, not only when the
-// pointer happens to move.
+// pointer happens to move.  The world load, not the hero's: heroLoad also runs
+// on every save, and a save is not a new hero.
 var heroPending = false;
 
 function onHero(fn) {
@@ -380,10 +381,10 @@ function whileLoading(name, rva, starting) {
     });
 }
 
-whileLoading("loadWindowWorld", RVA.worldLoad);
-whileLoading("loadWindowHero", RVA.heroLoad, function () {
+whileLoading("loadWindowWorld", RVA.worldLoad, function () {
     heroPending = true;
 });
+whileLoading("loadWindowHero", RVA.heroLoad);
 
 function isLoading() {
     return loading > 0 || loadEcho;
