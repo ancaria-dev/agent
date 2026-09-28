@@ -26,9 +26,22 @@
 //   "mouse.wheel"    the wheel turned.
 //   "window.focus"   the game's window became active (1) or not (0).
 //
+// While a mod's layer holds the keyboard (99-overlay.js), its keys go to the
+// layer instead, and neither the game nor a KeyPress sees them:
+//
+//   "layer.key_press"    layer, and the fields of "key.press"
+//   "layer.key_release"  layer, and the fields of "key.release"; the release
+//                        of a key the layer took goes to that layer even
+//                        after the focus has moved
+//   "layer.key_type"     layer, ch, mods
+//
+// Alt's combinations (WM_SYSKEYDOWN) still reach the game, so Alt+Tab and
+// Alt+F4 keep working.
+//
 //   input.down       whether a key (vk) or a mouse button (button, 1..5) is
 //                    held now, for a mod that polls: GetAsyncKeyState, and
 //                    never while another window is the active one.
+//   input.cursor     where the game draws its cursor, in back-buffer pixels
 //
 // Asking stops the window's thread, not the engine's: the world keeps
 // running while a mod decides.  Keys the game polls with GetAsyncKeyState
@@ -62,6 +75,8 @@ var INPUT_ALT = 4;
 
 // Keys whose press was vetoed, until their release; buttons the same.
 var inputKeysHeld = {};
+// Keys a layer took, by the layer that took them, until their release.
+var inputLayerKeys = {};
 var inputButtonsHeld = {};
 // The characters TranslateMessage made of a vetoed press come right after it.
 var inputSwallowChars = false;
@@ -199,9 +214,69 @@ function inputOverlay(kind, button, point, delta, mods) {
     return overlayPointer(kind, button, point.x, point.y, delta, mods);
 }
 
+function inputKeyboard() {
+    return typeof overlayKeyboard === "function" ? overlayKeyboard() : null;
+}
+
+// A key for the layer that holds the keyboard: false to keep it from the
+// game, null when no layer wants it.  Esc goes to the layer and takes the
+// focus from it, and its character is kept from the game as well.
+function inputLayerKey(hwnd, msg, wParam, lParam) {
+    if (msg === INPUT_KEYDOWN) {
+        var id = inputKeyboard();
+        if (id === null) {
+            return null;
+        }
+        var down = inputKeyFields(wParam, lParam, inputMods());
+        down.layer = id;
+        down.repeat = ((lParam >>> 30) & 1) === 1 ? 1 : 0;
+        inputLayerKeys[down.vk] = id;
+        inputSwallowChars = false;
+        evt("layer.key_press", down);
+        if (down.vk === 0x1B) {
+            overlayLoseFocus(id);
+            inputSwallowChars = true;
+        }
+        return false;
+    }
+    if (msg === INPUT_CHAR) {
+        if (inputSwallowChars) {
+            return false;
+        }
+        var holder = inputKeyboard();
+        if (holder === null) {
+            return null;
+        }
+        var typed = inputChars(hwnd, wParam);
+        var mods = inputMods();
+        for (var c = 0; c < typed.length; c++) {
+            evt("layer.key_type", { layer: holder, ch: typed[c], mods: mods });
+        }
+        return false;
+    }
+    if (msg === INPUT_KEYUP) {
+        var vk = wParam & 0xFF;
+        var owner = inputLayerKeys[vk];
+        if (owner === undefined) {
+            return null;
+        }
+        delete inputLayerKeys[vk];
+        inputSwallowChars = false;
+        var up = inputKeyFields(wParam, lParam, inputMods());
+        up.layer = owner;
+        evt("layer.key_release", up);
+        return false;
+    }
+    return null;
+}
+
 // What one message means, and whether the game still gets it.  Returns false
 // to keep it from the game.
 function inputMessage(hwnd, msg, wParam, lParam) {
+    var layerKey = inputLayerKey(hwnd, msg, wParam, lParam);
+    if (layerKey !== null) {
+        return layerKey;
+    }
     if (msg === INPUT_KEYDOWN || msg === INPUT_SYSKEYDOWN) {
         var down = inputKeyFields(wParam, lParam, inputMods());
         var repeat = ((lParam >>> 30) & 1) === 1;
@@ -292,6 +367,7 @@ function inputMessage(hwnd, msg, wParam, lParam) {
         if (!active) {
             // Nothing held down survives the switch: the releases go elsewhere.
             inputKeysHeld = {};
+            inputLayerKeys = {};
             inputButtonsHeld = {};
             inputSwallowChars = false;
             inputOverlay("leave", 0, { x: -1, y: -1 }, 0, 0);
@@ -350,4 +426,16 @@ command("input.down", function (f) {
         return { down: 0, focused: 0 };
     }
     return { down: n.asyncState(vk) < 0 ? 1 : 0, focused: 1 };
+});
+
+var INPUT_MOUSE_X = 0x04;
+
+// The mouse object's point, which the game draws its cursor at and moves on
+// every WM_MOUSEMOVE: back-buffer pixels, like a layer's position.
+command("input.cursor", function () {
+    var mouse = ptr(VA.mouse).readPointer();
+    if (mouse.isNull()) {
+        return {};
+    }
+    return { x: mouse.add(INPUT_MOUSE_X).readS32(), y: mouse.add(INPUT_MOUSE_X + 4).readS32() };
 });
