@@ -239,6 +239,7 @@ function describe(full) {
     try {
         var typeId = full.add(0x10).readU32() >>> 0;
         return {
+            ref: full.add(0x0C).readU32() >>> 0,
             typeId: typeId,
             name: typeName(typeId),
             level: full.add(0x3FE).readU16(),

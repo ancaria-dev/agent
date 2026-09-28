@@ -33,7 +33,9 @@ function entityHp(sheet, next, kind, damage) {
     }
     // A site that does not name its kind is told by the direction of the change.
     kind = kind || hpKind(delta);
+    // The hero passes through here too, so the payload says who it is.
     var payload = {
+        ref: e.ref, player: e.player ? 1 : 0, x: e.x, y: e.y,
         type: e.typeId, name: e.name, level: e.level,
         prev: e.hp, next: next, max: e.maxHp,
         damage: damage, kind: kind
