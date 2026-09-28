@@ -163,14 +163,13 @@ function screenChange(ev, inCommand) {
     return open === visible ? null : { name: name, open: open };
 }
 
-// A veto rewrites the event's id for good.  Not put back in an onLeave: with
-// one, spending a skill point crashed the game in the next onLeave on the
-// thread, the way a call left by an exception does (see callOpen).  Nor in the
-// epilogue, where every instruction moves the stack and the game crashed while
-// loading with a hook on either of two.  The events of loading, keys and
-// hotkeys are temporaries, one on its caller's stack, so writing to them later
-// could hit anything.  Only an event the game hands over again, still vetoed,
-// is known to be alive, and gets its id back before anything else.
+// A veto rewrites the event's id for good.  Not put back in an onLeave (see
+// callOpen), nor in the epilogue, where every instruction moves the stack and
+// the game crashed while loading with a hook on either of two.  The events of
+// loading, keys and hotkeys are temporaries, one on its caller's stack, so
+// writing to them later could hit anything.  Only an event the game hands
+// over again, still vetoed, is known to be alive, and gets its id back before
+// anything else.
 function screenRevive(ev) {
     for (var i = screenVetoes.length - 1; i >= 0; i--) {
         var veto = screenVetoes[i];

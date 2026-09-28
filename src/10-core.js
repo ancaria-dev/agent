@@ -457,12 +457,10 @@ function switchable(name, rva, callbacks) {
     };
 }
 
-// Calls still running, for hooks that must know "inside" without an onLeave.
-// An onLeave makes Frida swap the return address and keep a return stack per
-// thread, and a function the game leaves by an exception never pops it: the
-// next onLeave on that thread returns into the heap.  With an onLeave on
-// cUI_Manager::receive_event, spending a skill point crashed the game in
-// cDxDriver7::flip's onLeave.
+// Calls still running, for hooks that must know "inside" or "after" without
+// an onLeave.  An onLeave makes Frida swap the return address and keep a return
+// stack per thread, and a function the game leaves by an exception never pops
+// it, so the next onLeave on that thread would return into the heap.
 //
 // callOpen notes a call at a function entry: the thread, ESP and the return
 // address in [esp].  The call runs while that slot still holds it, because the
