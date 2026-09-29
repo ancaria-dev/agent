@@ -89,7 +89,9 @@ var OVERLAY_FOCUS = 48;
 var OVERLAY_INPUT_ALPHA = 52;
 var OVERLAY_MOUSE_X = 0x04;
 var OVERLAY_MOUSE_SHAPE = 0x64;
-var OVERLAY_STATE = 32;             // tex, texW, texH, lastSeq, failures, header bytes
+var OVERLAY_STATE = 32;             // tex, texW, texH, lastSeq, failures, header bytes,
+                                    // uploads, KiB uploaded (since the last report)
+var OVERLAY_REPORT_MS = 30000;
 
 var OVERLAY_C = [
     "#include <stdint.h>",
@@ -151,18 +153,16 @@ var OVERLAY_C = [
     "  if (s != 0 && s != st[3]) {",
     "    h->reading = s; fence();",
     "    if (h->seq == s) {",
-    "      uint32_t b = h->front & 1; int32_t hr;",
+    "      uint32_t b = h->front & 1; int32_t hr, rx = 0, ry = 0, rw = w, rh = hh;",
     "      const uint8_t *src = view + st[5] + b * w * hh * 4;",
     "      if (st[5] >= 128 && st[3] != 0 && st[3] == s - 1) {",
     "        volatile int32_t *c = h->changed + 4 * b;",
-    "        int32_t rx = c[0], ry = c[1], rw = c[2], rh = c[3];",
+    "        rx = c[0]; ry = c[1]; rw = c[2]; rh = c[3];",
     "        if (rx < 0 || ry < 0 || rw < 0 || rh < 0 || rx + rw > (int32_t) w || ry + rh > (int32_t) hh)",
     "          { rx = 0; ry = 0; rw = w; rh = hh; }",
-    "        hr = upload((void *) st[0], src, w, rx, ry, rw, rh);",
-    "      } else {",
-    "        hr = upload((void *) st[0], src, w, 0, 0, w, hh);",
     "      }",
-    "      if (hr >= 0) { st[3] = s; h->ack = s; }",
+    "      hr = upload((void *) st[0], src, w, rx, ry, rw, rh);",
+    "      if (hr >= 0) { st[3] = s; h->ack = s; st[6]++; st[7] += ((uint32_t) rw * rh * 4) >> 10; }",
     "      else { m1((void *) st[0], 27); st[3] = 0; }",
     "    }",
     "    h->reading = 0;",
@@ -224,6 +224,10 @@ var overlayFocusLast = null;
 var overlayHover = null;
 var overlayCapture = null;
 var overlayCaptureButton = 0;
+// What drawing the layers costs the game's frame, since the last report:
+// passes that copied a new picture, and passes that only drew.
+var overlayCost = { copied: { us: 0, n: 0 }, drawn: { us: 0, n: 0 } };
+var overlayReported = 0;
 
 function overlayNatives() {
     if (overlayC === null && overlayCError === null) {
@@ -324,12 +328,52 @@ function overlayRender(driver, world) {
     if (shown.length === 0) {
         return;
     }
+    var copies = false;
     for (var i = 0; i < shown.length; i++) {
         overlayViews.add(4 * i).writePointer(shown[i].view);
         overlayStates.add(4 * i).writePointer(shown[i].state);
+        copies = copies || overlayRead(shown[i], 16) !== shown[i].state.add(12).readS32();
     }
+    var start = nowMicros();
     overlayC.draw(driver.add(0xB4).readPointer(), driver.add(0xCC).readPointer(),
                   overlayViews, overlayStates, shown.length);
+    var cost = copies ? overlayCost.copied : overlayCost.drawn;
+    cost.us += nowMicros() - start;
+    cost.n += 1;
+    overlayReport();
+}
+
+// Every 30 seconds, while layers show, what they cost the game's frame: the
+// average pass that copied a new picture and one that did not, and for each
+// layer how many pictures it copied and how much of each.
+function overlayReport() {
+    var now = Date.now();
+    if (overlayReported === 0) {
+        overlayReported = now;
+    }
+    if (now - overlayReported < OVERLAY_REPORT_MS) {
+        return;
+    }
+    overlayReported = now;
+    var parts = [];
+    for (var id in overlayLayers) {
+        var layer = overlayLayers[id];
+        var uploads = layer.state.add(24).readU32();
+        if (uploads > 0) {
+            parts.push("layer " + id + " " + layer.width + "x" + layer.height + " " + uploads +
+                       " copies of " + (layer.state.add(28).readU32() / uploads).toFixed(0) + " KiB");
+        }
+        layer.state.add(24).writeU32(0);
+        layer.state.add(28).writeU32(0);
+    }
+    var c = overlayCost.copied;
+    var d = overlayCost.drawn;
+    if (c.n + d.n > 0) {
+        note("overlay per pass: copying " + (c.n > 0 ? (c.us / c.n).toFixed(1) : "-") + " us (" + c.n +
+             "), drawing only " + (d.n > 0 ? (d.us / d.n).toFixed(1) : "-") + " us (" + d.n + ")" +
+             (parts.length > 0 ? "; " + parts.join(", ") : ""));
+    }
+    overlayCost = { copied: { us: 0, n: 0 }, drawn: { us: 0, n: 0 } };
 }
 
 // One plane inside a scene the game has begun.
