@@ -114,7 +114,11 @@ function nativeNatives() {
                                          ["pointer", "pointer"], { abi: "stdcall" }),
             iconic: new NativeFunction(user32.getExportByName("IsIconic"), "int", ["pointer"],
                                        { abi: "stdcall" }),
-            title: new NativeFunction(user32.getExportByName("GetWindowTextW"), "int",
+            // Never GetWindowTextW: it sends WM_GETTEXT and waits for the
+            // window's thread, which a loading stage holds while this thread
+            // is the one that must deliver the stage's answer.  That froze
+            // the game at Game:Ready.  This reads the title without asking.
+            title: new NativeFunction(user32.getExportByName("InternalGetWindowText"), "int",
                                       ["pointer", "pointer", "int"], { abi: "stdcall" }),
             text: Memory.alloc(512),
             monitor: new NativeFunction(user32.getExportByName("MonitorFromWindow"), "pointer",
