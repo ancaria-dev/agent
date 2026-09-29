@@ -5,7 +5,7 @@
 // (Java's FileChannel.map and CreateFileMapping here give views of the same
 // pages).  One file per layer, made by zygote:
 //
-//   +0   'ALYR'       +4  version 1   +8  width     +12 height
+//   +0   'ALYR'       +4  version 2   +8  width     +12 height
 //   +16  seq          the frames Java has published; 0 = none yet
 //   +20  front        which of the two buffers holds frame seq
 //   +24  reading      the frame this side is copying now, 0 when idle
@@ -16,13 +16,23 @@
 //                     8 hides the game's cursor over it
 //   +48  focus        nonzero while the layer holds the keyboard; Java sets
 //                     it, this side clears it when the focus goes
-//   +64  two buffers of width * height premultiplied ARGB, 32 bits a pixel
+//   +52  input alpha  a press is the layer's only where the alpha of its
+//                     newest picture is above this; -1 counts the rectangle
+//   +64  changed      per buffer, x, y, width, height of what differs from
+//                     the frame before it: buffer 0 at +64, buffer 1 at +80
+//   +128 two buffers of width * height premultiplied ARGB, 32 bits a pixel
+//
+// Version 1, from a zygote older than this agent, has a 64-byte header, no
+// input alpha and no changed rectangles: every copy is whole and the whole
+// rectangle takes the mouse.
 //
 // Java writes the buffer that is not front and then publishes; it waits only
 // while this side is still copying the frame before, which takes
 // microseconds.  This side sets reading, checks seq is still that frame and
 // copies it, so a frame published meanwhile is taken whole on the next pass.
 // The game never waits for Java: without a new frame the last one shows.
+// Only the changed rectangle is copied, and the whole frame when the texture
+// does not hold the frame before (a new or restored texture, a frame missed).
 //
 // The copy goes into a managed Direct3D 7 texture, drawn as one alpha-blended
 // quad.  A layer of the top plane is drawn at cEngine's cursor draw, pass 1
@@ -41,10 +51,12 @@
 // lives in memory this script allocates.
 //
 // The mouse: 93-input.js asks overlayPointer before the game sees a button
-// or the wheel.  A press on a visible layer that takes the mouse is the
-// layer's, and so is everything up to that button's release; moves go to the
-// layer under the cursor and to the game as well, since the game draws the
-// cursor from them.  The game's cursor is not drawn while it is over a
+// or the wheel.  A press on a visible layer that takes the mouse, at a pixel
+// of its newest picture whose alpha is above the layer's input alpha, is the
+// layer's, and so is everything up to that button's release; a press on a
+// transparent pixel goes to the game.  Moves go to the layer under the cursor
+// by the same rule and to the game as well, since the game draws the cursor
+// from them.  The game's cursor is not drawn while it is over a
 // visible layer that hides it: mouse::draw draws nothing without a shape, so
 // the shape is cleared for that call and put back after it.
 //
@@ -66,8 +78,7 @@
 //   overlay.layers  the ids mapped now
 
 var OVERLAY_MAGIC = 0x52594C41;     // "ALYR"
-var OVERLAY_VERSION = 1;
-var OVERLAY_HEADER = 64;
+var OVERLAY_HEADERS = { 1: 64, 2: 128 };
 var OVERLAY_MAX = 16;
 var OVERLAY_SIDE_MAX = 4096;
 var OVERLAY_VISIBLE = 1;
@@ -75,9 +86,10 @@ var OVERLAY_INPUT = 2;
 var OVERLAY_WORLD = 4;
 var OVERLAY_HIDES_CURSOR = 8;
 var OVERLAY_FOCUS = 48;
+var OVERLAY_INPUT_ALPHA = 52;
 var OVERLAY_MOUSE_X = 0x04;
 var OVERLAY_MOUSE_SHAPE = 0x64;
-var OVERLAY_STATE = 32;             // tex, texW, texH, lastSeq, failures
+var OVERLAY_STATE = 32;             // tex, texW, texH, lastSeq, failures, header bytes
 
 var OVERLAY_C = [
     "#include <stdint.h>",
@@ -101,7 +113,9 @@ var OVERLAY_C = [
     "static uint32_t m6(void *o, int i, uint32_t x, uint32_t y, uint32_t z, uint32_t w, uint32_t v) { uint32_t a[6]; a[0] = (uint32_t) o; a[1] = x; a[2] = y; a[3] = z; a[4] = w; a[5] = v; return ccall(vt(o)[i], 6, a); }",
     "struct desc { uint32_t size, flags, height, width; int32_t pitch; uint32_t bb, mip, alphadepth, res; void *surface;",
     "  uint32_t ck[8]; uint32_t pf[8]; uint32_t caps[4]; uint32_t stage; };",
-    "struct hdr { uint32_t magic, version, width, height, seq, front, reading, ack; int32_t x, y, z; uint32_t flags; };",
+    "struct hdr { uint32_t magic, version, width, height, seq, front, reading, ack; int32_t x, y, z; uint32_t flags, focus;",
+    "  int32_t input_alpha; uint32_t pad[2]; int32_t changed[8]; };",
+    "struct rect { int32_t left, top, right, bottom; };",
     "static uint32_t pow2(uint32_t v) { uint32_t p = 1; while (p < v) p <<= 1; return p; }",
     "static void *create_texture(void *dd, uint32_t w, uint32_t h) {",
     "  struct desc d; void *s = 0; memset(&d, 0, sizeof d);",
@@ -111,12 +125,16 @@ var OVERLAY_C = [
     "  if ((int32_t) m4(dd, 6, (uint32_t) &d, (uint32_t) &s, 0) < 0) return 0;",
     "  return s;",
     "}",
-    "static int32_t upload(void *tex, const uint8_t *src, uint32_t w, uint32_t h) {",
-    "  struct desc d; uint32_t y; int32_t hr; memset(&d, 0, sizeof d); d.size = sizeof d;",
-    "  hr = (int32_t) m5(tex, 25, 0, (uint32_t) &d, 1 | 0x20, 0);",
+    "/* Copies the part rx, ry, rw, rh of a w-wide frame; Lock points at its corner. */",
+    "static int32_t upload(void *tex, const uint8_t *src, uint32_t w, int32_t rx, int32_t ry, int32_t rw, int32_t rh) {",
+    "  struct desc d; struct rect r; int32_t y, hr; memset(&d, 0, sizeof d); d.size = sizeof d;",
+    "  if (rw <= 0 || rh <= 0) return 0;",
+    "  r.left = rx; r.top = ry; r.right = rx + rw; r.bottom = ry + rh;",
+    "  hr = (int32_t) m5(tex, 25, (uint32_t) &r, (uint32_t) &d, 1 | 0x20, 0);",
     "  if (hr < 0) return hr;",
-    "  for (y = 0; y < h; y++) memcpy((uint8_t *) d.surface + y * d.pitch, src + y * w * 4, w * 4);",
-    "  m2(tex, 32, 0);",
+    "  for (y = 0; y < rh; y++)",
+    "    memcpy((uint8_t *) d.surface + y * d.pitch, src + ((ry + y) * w + rx) * 4, rw * 4);",
+    "  m2(tex, 32, (uint32_t) &r);",
     "  return 0;",
     "}",
     "static int sync(void *dd, uint8_t *view, uint32_t *st) {",
@@ -133,9 +151,19 @@ var OVERLAY_C = [
     "  if (s != 0 && s != st[3]) {",
     "    h->reading = s; fence();",
     "    if (h->seq == s) {",
-    "      int32_t hr = upload((void *) st[0], view + 64 + (h->front & 1) * w * hh * 4, w, hh);",
+    "      uint32_t b = h->front & 1; int32_t hr;",
+    "      const uint8_t *src = view + st[5] + b * w * hh * 4;",
+    "      if (st[5] >= 128 && st[3] != 0 && st[3] == s - 1) {",
+    "        volatile int32_t *c = h->changed + 4 * b;",
+    "        int32_t rx = c[0], ry = c[1], rw = c[2], rh = c[3];",
+    "        if (rx < 0 || ry < 0 || rw < 0 || rh < 0 || rx + rw > (int32_t) w || ry + rh > (int32_t) hh)",
+    "          { rx = 0; ry = 0; rw = w; rh = hh; }",
+    "        hr = upload((void *) st[0], src, w, rx, ry, rw, rh);",
+    "      } else {",
+    "        hr = upload((void *) st[0], src, w, 0, 0, w, hh);",
+    "      }",
     "      if (hr >= 0) { st[3] = s; h->ack = s; }",
-    "      else m1((void *) st[0], 27);",
+    "      else { m1((void *) st[0], 27); st[3] = 0; }",
     "    }",
     "    h->reading = 0;",
     "  }",
@@ -418,8 +446,9 @@ hook("overlayFlip", RVA.frameFlip, {
     }
 });
 
-// The topmost visible layer with a flag at a point, top plane first.
-function overlayAt(x, y, flag) {
+// The topmost visible layer with a flag at a point, top plane first.  With
+// `solid`, only where its newest picture is opaque enough to take input.
+function overlayAt(x, y, flag, solid) {
     var planes = [overlayShown(false), overlayShown(true)];
     for (var p = 0; p < planes.length; p++) {
         var shown = planes[p];
@@ -428,9 +457,10 @@ function overlayAt(x, y, flag) {
             if ((overlayRead(layer, 44) & flag) === 0) {
                 continue;
             }
-            var lx = overlayRead(layer, 32);
-            var ly = overlayRead(layer, 36);
-            if (x >= lx && y >= ly && x < lx + layer.width && y < ly + layer.height) {
+            var lx = x - overlayRead(layer, 32);
+            var ly = y - overlayRead(layer, 36);
+            if (lx >= 0 && ly >= 0 && lx < layer.width && ly < layer.height &&
+                    (!solid || overlaySolid(layer, lx, ly))) {
                 return layer;
             }
         }
@@ -438,9 +468,25 @@ function overlayAt(x, y, flag) {
     return null;
 }
 
+// Whether a layer's newest picture takes input at a point of it: its alpha
+// there above the layer's input alpha.  Java only writes the buffer that is
+// not front, so the front one holds that picture.
+function overlaySolid(layer, lx, ly) {
+    if (layer.header < 128) {
+        return true;
+    }
+    var threshold = overlayRead(layer, OVERLAY_INPUT_ALPHA);
+    if (threshold < 0) {
+        return true;
+    }
+    var front = overlayRead(layer, 20) & 1;
+    var pixel = front * layer.width * layer.height + ly * layer.width + lx;
+    return layer.view.add(layer.header + 4 * pixel + 3).readU8() > threshold;
+}
+
 // The topmost visible layer that takes the mouse at a point.
 function overlayHit(x, y) {
-    return overlayAt(x, y, OVERLAY_INPUT);
+    return overlayAt(x, y, OVERLAY_INPUT, true);
 }
 
 // The layer that holds the keyboard, or null: the newest visible one with
@@ -624,8 +670,9 @@ command("overlay.add", function (f) {
     var version = mapped.view.add(4).readU32();
     layer.width = mapped.view.add(8).readU32();
     layer.height = mapped.view.add(12).readU32();
-    var need = OVERLAY_HEADER + 2 * 4 * layer.width * layer.height;
-    if (magic !== OVERLAY_MAGIC || version !== OVERLAY_VERSION || layer.width < 1 ||
+    layer.header = OVERLAY_HEADERS[version] || 0;
+    var need = layer.header + 2 * 4 * layer.width * layer.height;
+    if (magic !== OVERLAY_MAGIC || layer.header === 0 || layer.width < 1 ||
             layer.height < 1 || layer.width > OVERLAY_SIDE_MAX || layer.height > OVERLAY_SIDE_MAX ||
             mapped.size < need) {
         overlayUnmap(layer);
@@ -635,6 +682,7 @@ command("overlay.add", function (f) {
     for (var i = 0; i < OVERLAY_STATE; i += 4) {
         layer.state.add(i).writeU32(0);
     }
+    layer.state.add(20).writeU32(layer.header);
     overlayLayers[id] = layer;
     return { id: id, width: layer.width, height: layer.height };
 });
