@@ -649,10 +649,11 @@ function d12Report() {
 // presenting thread run in the meantime.
 function d12StageFields(fields, wait) {
     if (wait && d12.told === null) {
-        var until = Date.now() + D12_DECIDE_MS;
-        while (d12Why() === '' && Date.now() < until) {
+        var from = Date.now();
+        while (d12Why() === '' && Date.now() - from < D12_DECIDE_MS) {
             Thread.sleep(0.02);
         }
+        note('drawing backend ' + d12.backend + ' at the first stage, after ' + (Date.now() - from) + ' ms');
     }
     var report = d12Report();
     d12.told = JSON.stringify(report);
