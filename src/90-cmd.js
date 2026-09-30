@@ -134,6 +134,16 @@ command("player.skills", function () {
     return skillsNow();
 });
 
+// The mark cheats leave on the hero, the one that turns it into a rabbit: the
+// word the creature's property 0x24 tests (0x0055DC03), which an exported
+// hero's card copies.
+var HERO_CHEAT = 0x1FE;
+
+command("player.cheater", function () {
+    requireHero();
+    return { cheater: heroFull.add(HERO_CHEAT).readU16() !== 0 ? 1 : 0 };
+});
+
 command("player.skill", function (f) {
     requireHero();
     var slot = parseInt(f.slot, 10);
