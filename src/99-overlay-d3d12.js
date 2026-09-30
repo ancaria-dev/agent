@@ -390,7 +390,7 @@ function d12Open(s, layer) {
     var desc = Memory.alloc(64);
     d12Com(objects[0], 10, 'void', ['pointer'])(desc);
     g = { device: s.device, textures: [objects[0], objects[1]], ready: objects[2], done: objects[3],
-          width: desc.add(16).readU32(), height: desc.add(24).readU32(), slot: s.srvFree.pop() };
+          width: desc.add(16).readU32(), height: desc.add(24).readU32(), slot: s.srvFree.pop(), frame: 0 };
     for (var t = 0; t < 2; t++) {
         d12Com(s.device, 18, 'void', ['pointer', 'pointer', 'uint32'])(g.textures[t], NULL, s.srvCpu + (2 * g.slot + t) * s.srvStep);
     }
@@ -442,9 +442,16 @@ function d12ReleaseRetired(s, completed) {
 }
 
 // Whether a layer is the GPU path's: a visible TOP-plane layer of backend 12.
-function d12Owns(layer) {
+function d12Wants(layer) {
     return d12.backend === 12 && layer.header >= 128 && overlayRead(layer, D12_GPU) === 1 &&
         (overlayRead(layer, 44) & OVERLAY_WORLD) === 0;
+}
+
+// Whether this file draws the layer: its newest frame is in a texture, and the
+// GPU has finished at least one.  Until then backend 7 shows the file's frame,
+// so a layer never blinks out while it moves to the GPU.
+function d12Owns(layer) {
+    return d12Wants(layer) && layer.d12 !== undefined && layer.d12.frame > 0;
 }
 
 function d12Barrier(s, res, before, after) {
@@ -476,7 +483,7 @@ function d12OnPresent(sc) {
     var all = overlayShownAll(false);
     for (var i = 0; i < all.length; i++) {
         var layer = all[i];
-        if (!d12Owns(layer)) {
+        if (!d12Wants(layer)) {
             continue;
         }
         var g = d12Open(s, layer);
@@ -484,7 +491,8 @@ function d12OnPresent(sc) {
             continue;
         }
         var frame = d12Com(g.ready, 8, 'uint64', [])();
-        if (frame.toNumber() > 0) {
+        g.frame = frame.toNumber();
+        if (g.frame > 0) {
             shown.push({ layer: layer, g: g, frame: frame });
         }
     }

@@ -284,7 +284,7 @@ function overlayRead(layer, off) {
 // left out.
 function overlayShown(world) {
     return overlayShownAll(world).filter(function (layer) {
-        return !d12Owns(layer);
+        return !d12Owns(layer) && overlayRead(layer, 16) !== 0;
     });
 }
 
@@ -299,7 +299,7 @@ function overlayShownAll(world) {
     for (var id in overlayLayers) {
         var layer = overlayLayers[id];
         var flags = overlayRead(layer, 44);
-        if (!layer.dead && (flags & OVERLAY_VISIBLE) !== 0 && (overlayRead(layer, 16) !== 0 || d12Owns(layer)) &&
+        if (!layer.dead && (flags & OVERLAY_VISIBLE) !== 0 && (overlayRead(layer, 16) !== 0 || d12Wants(layer)) &&
                 (world === undefined || ((flags & OVERLAY_WORLD) !== 0) === world)) {
             shown.push(layer);
         }
