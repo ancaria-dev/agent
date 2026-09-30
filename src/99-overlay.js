@@ -278,11 +278,20 @@ function overlayRead(layer, off) {
     return layer.view.add(off).readS32();
 }
 
-// Visible layers with a frame, bottom first: of one plane when `world` is
-// true or false, of both when it is undefined.  None once the host stops
-// asking, which it does when the JVM that owns them is gone (and under
-// --no-ask).
+// Visible layers with a frame that this file draws with Direct3D 7, bottom
+// first: of one plane when `world` is true or false, of both when it is
+// undefined.  A layer backend 12 draws at Present (99-overlay-d3d12.js) is
+// left out.
 function overlayShown(world) {
+    return overlayShownAll(world).filter(function (layer) {
+        return !d12Owns(layer);
+    });
+}
+
+// Every visible layer with a frame, whoever draws it: what the mouse and the
+// cursor see.  None once the host stops asking, which it does when the JVM
+// that owns them is gone (and under --no-ask).
+function overlayShownAll(world) {
     var shown = [];
     if (!askEnabled) {
         return shown;
@@ -290,7 +299,7 @@ function overlayShown(world) {
     for (var id in overlayLayers) {
         var layer = overlayLayers[id];
         var flags = overlayRead(layer, 44);
-        if (!layer.dead && (flags & OVERLAY_VISIBLE) !== 0 && overlayRead(layer, 16) !== 0 &&
+        if (!layer.dead && (flags & OVERLAY_VISIBLE) !== 0 && (overlayRead(layer, 16) !== 0 || d12Owns(layer)) &&
                 (world === undefined || ((flags & OVERLAY_WORLD) !== 0) === world)) {
             shown.push(layer);
         }
@@ -312,6 +321,7 @@ function overlayCollect() {
     for (var id in overlayLayers) {
         var layer = overlayLayers[id];
         if (layer.dead) {
+            d12Retire(layer);
             overlayC.release(layer.state);
             overlayUnmap(layer);
             delete overlayLayers[id];
@@ -493,7 +503,7 @@ hook("overlayFlip", RVA.frameFlip, {
 // The topmost visible layer with a flag at a point, top plane first.  With
 // `solid`, only where its newest picture is opaque enough to take input.
 function overlayAt(x, y, flag, solid) {
-    var planes = [overlayShown(false), overlayShown(true)];
+    var planes = [overlayShownAll(false), overlayShownAll(true)];
     for (var p = 0; p < planes.length; p++) {
         var shown = planes[p];
         for (var i = shown.length - 1; i >= 0; i--) {
@@ -516,7 +526,9 @@ function overlayAt(x, y, flag, solid) {
 // there above the layer's input alpha.  Java only writes the buffer that is
 // not front, so the front one holds that picture.
 function overlaySolid(layer, lx, ly) {
-    if (layer.header < 128) {
+    // A GPU layer's pixels are not in memory here: the whole rectangle
+    // counts until a readback of its alpha exists (docs/BACKEND12.md).
+    if (layer.header < 128 || d12Owns(layer)) {
         return true;
     }
     var threshold = overlayRead(layer, OVERLAY_INPUT_ALPHA);
