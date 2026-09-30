@@ -83,6 +83,25 @@ command("player.stats", function () {
     };
 });
 
+// Sets the difficulties an exported hero will be offered the way the finale
+// does it (0x004AEE30 raises the current difficulty's count, 0x00424CF0):
+// the difficulty below the wanted one counts as completed at least once, and
+// every count above it is cleared.  f.level is 1 (Silver) .. 4 (Niobium).
+command("player.unlock", function (f) {
+    var level = parseInt(f.level, 10);
+    if (isNaN(level) || level < 1 || level > 4) {
+        throw new Error("No difficulty " + f.level + " to unlock up to.");
+    }
+    var block = journalBlock();
+    for (var k = level; k < 6; k++) {
+        block.add(JOURNAL.flags + k).writeU8(0);
+    }
+    if (level > 1 && block.add(JOURNAL.flags + level - 1).readU8() === 0) {
+        block.add(JOURNAL.flags + level - 1).writeU8(1);
+    }
+    return { ok: 1 };
+});
+
 // The kill recorder's entry, `this` = cStats.  Its first argument is the
 // victim's type, and its third the value the game keeps as a per-type maximum,
 // sent raw as `a2` until it is confirmed to be the victim's level.  Every call
