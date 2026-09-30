@@ -13,7 +13,8 @@ var JOURNAL = {
     hours: 0x56F8,
     minutes: 0x56FC,
     millis: 0x5700,
-    sinceDeath: 0x570C
+    sinceDeath: 0x570C,
+    created: 0x5720
 };
 
 var getGameState = new NativeFunction(at(RVA.getGameState), "pointer", [],
@@ -48,7 +49,18 @@ command("player.stats", function () {
         return block.add(offset).readU32() >>> 0;
     };
     var sinceDeath = u32(JOURNAL.sinceDeath);
+    // The day the hero was made, set once from GetLocalTime (0x00423F50):
+    // the year's low byte plus 0x44, then month, then day.
+    var yearByte = block.add(JOURNAL.created).readU8();
+    var month = block.add(JOURNAL.created + 1).readU8();
+    var day = block.add(JOURNAL.created + 2).readU8();
+    var created = "";
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+        created = (0x700 | ((yearByte - 0x44) & 0xFF)) + "-" + pad(month) + "-" + pad(day);
+    }
     return {
+        created: created,
         kills: u32(JOURNAL.kills),
         resurrections: u32(JOURNAL.resurrections),
         areas: u32(JOURNAL.discovered),
