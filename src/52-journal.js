@@ -125,6 +125,66 @@ command("player.unlock", function (f) {
     return { ok: 1 };
 });
 
+// Completed difficulties and the survival bonus, compared about once a second.
+// Neither has a place to hook: the finale raises a count through a script
+// command (0x004AEE30) and the console through cheats, and the bonus is a
+// curve over a millisecond clock nothing announces.  One sampler reads six
+// bytes and a dword of the statistics block.  The first reading after a hero
+// arrives is where they start, not a change.
+var journalCountsLast = null;
+var journalSurvivalLast = null;
+
+function journalUnlocked(counts) {
+    var unlocked = 1;
+    for (var k = 1; k <= counts.length; k++) {
+        if (counts[k - 1] !== 0) {
+            unlocked = k;
+        }
+    }
+    return Math.min(unlocked, 4);
+}
+
+onSample(SAMPLE_SLOW, ["hero.difficulty_completed", "hero.survival_changed"], function () {
+    if (isLoading() || !live(heroFull)) {
+        journalCountsLast = null;
+        journalSurvivalLast = null;
+        return;
+    }
+    var block;
+    try {
+        block = journalBlock();
+    } catch (e) {
+        return;
+    }
+    var counts = [];
+    for (var k = 0; k < 6; k++) {
+        counts.push(block.add(JOURNAL.flags + k).readU8());
+    }
+    var before = journalCountsLast;
+    journalCountsLast = counts;
+    if (before !== null) {
+        for (var d = 0; d < 5; d++) {
+            if (counts[d] > before[d]) {
+                evt("hero.difficulty_completed", { difficulty: d, count: counts[d],
+                                                   unlocked: journalUnlocked(counts) });
+            }
+        }
+    }
+    var since = block.add(JOURNAL.sinceDeath).readU32() >>> 0;
+    // Whole minutes, as the character screen feeds the curve (0x006A7E63).
+    var bonus = survivalCurve(0.0, Math.floor(since / 60000), 120.0, 50.0);
+    var last = journalSurvivalLast;
+    journalSurvivalLast = bonus;
+    if (last !== null && Math.floor(bonus) !== Math.floor(last)) {
+        evt("hero.survival_changed", { bonus: bonus, prev: last, sinceDeath: since });
+    }
+});
+
+onHero(function () {
+    journalCountsLast = null;
+    journalSurvivalLast = null;
+});
+
 // The kill recorder's entry, `this` = cStats.  Its first argument is the
 // victim's type, and its third the value the game keeps as a per-type maximum,
 // sent raw as `a2` until it is confirmed to be the victim's level.  Every call
