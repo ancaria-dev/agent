@@ -14,6 +14,7 @@ var JOURNAL = {
     minutes: 0x56FC,
     millis: 0x5700,
     sinceDeath: 0x570C,
+    flags: 0x5704,
     created: 0x5720
 };
 
@@ -59,7 +60,17 @@ command("player.stats", function () {
         var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
         created = (0x700 | ((yearByte - 0x44) & 0xFF)) + "-" + pad(month) + "-" + pad(day);
     }
+    // The difficulties an exported hero is offered, the hero select's rule
+    // (0x006F4ED0, 0x0070FDF0) over the same six flags: the highest set flag
+    // k (1..6) opens difficulties up to k, at least Silver, at most Niobium.
+    var unlocked = 1;
+    for (var k = 1; k <= 6; k++) {
+        if (block.add(JOURNAL.flags + k - 1).readU8() !== 0) {
+            unlocked = k;
+        }
+    }
     return {
+        unlocked: Math.min(unlocked, 4),
         created: created,
         kills: u32(JOURNAL.kills),
         resurrections: u32(JOURNAL.resurrections),
