@@ -90,10 +90,17 @@ function recalc() {
 
 function attributesNow() {
     var values = [];
+    var bases = [];
+    var invested = [];
     for (var i = 0; i < SHEET_ATTRS.length; i++) {
         values.push(heroSheet.add(SHEET_ATTRS[i]).readU16());
+        var spent = heroSheet.add(SHEET_INVESTED + i).readU8();
+        invested.push(spent);
+        bases.push(attributeWithoutGear(i) - spent);
     }
     return { values: values.join(","),
+             base: bases.join(","),
+             invested: invested.join(","),
              points: heroSheet.add(SHEET_ATTR_POINTS).readU8() };
 }
 
