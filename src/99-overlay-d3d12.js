@@ -823,16 +823,85 @@ function d12CursorDraw(s, l, fit, c, t) {
     d12Com(l, 25, 'void', ['pointer'])(s.pso);
 }
 
+// How dgVoodoo places the game's picture in its output, from the
+// dgVoodoo.conf beside the game, read once: ScalingMode ([General]),
+// WindowedAttributes ([GeneralExt]) and Resolution ([DirectX]).  Without the
+// file, layers stretch over the whole output.
+var d12Scaling = d12ReadScaling();
+
+function d12ReadScaling() {
+    var conf = { mode: 'stretched', resolution: 'unforced', windowedScaled: false };
+    try {
+        var dir = Process.enumerateModules()[0].path.replace(/[^\\\/]*$/, '');
+        var section = '';
+        File.readAllText(dir + 'dgVoodoo.conf').split(/\r?\n/).forEach(function (line) {
+            var head = line.match(/^\s*\[(\w+)\]/);
+            if (head !== null) {
+                section = head[1];
+                return;
+            }
+            var kv = line.match(/^\s*(\w+)\s*=\s*(.*?)\s*$/);
+            if (kv === null || kv[2] === '') {
+                return;
+            }
+            if (section === 'General' && kv[1] === 'ScalingMode') {
+                conf.mode = kv[2].toLowerCase();
+            } else if (section === 'GeneralExt' && kv[1] === 'WindowedAttributes') {
+                conf.windowedScaled = /fullscreensize/i.test(kv[2]);
+            } else if (section === 'DirectX' && kv[1] === 'Resolution') {
+                conf.resolution = kv[2].toLowerCase();
+            }
+        });
+        note('dgVoodoo scaling: ' + conf.mode + ', resolution ' + conf.resolution +
+             (conf.windowedScaled ? ', windowed full screen size' : ''));
+    } catch (e) {
+        note('dgVoodoo.conf not read, layers stretch over the output: ' + e.message);
+    }
+    return conf;
+}
+
 // Where the game's frame lies in the swap chain's, and its scale: layers are
-// placed in the game's pixels.  A plain stretch to the whole output, seen
-// right at the owner's forced 2560x1600, windowed, and with display scaling;
-// dgVoodoo's scaling modes with bars are untried (docs/BACKEND12.md).
+// placed in the game's pixels.  Measured 2026-09-30 with a 1920x1080 game in
+// a 2560x1600 output (fake fullscreen): centered and centered_ar put it 1:1
+// in the middle; stretched_ar and stretched_4_3 scale it by the smaller ratio,
+// 2560x1440 at y 80.  A window shows the picture over the whole window
+// whatever the mode, with Windows display scaling too, and a forced
+// Resolution renders at that size before the mode places it.  centered_ar as
+// an integer scale is inferred: at a ratio under 2 it cannot differ from 1.
 function d12Fit(s) {
-    var game = nativeDisplay();
-    if (game === null || game.width === 0 || game.height === 0) {
+    var d = nativeDriver();
+    var gw = d === null ? 0 : d.add(NATIVE_WIDTH).readU16();
+    var gh = d === null ? 0 : d.add(NATIVE_HEIGHT).readU16();
+    if (gw === 0 || gh === 0) {
         return { x: 0, y: 0, sx: 1, sy: 1 };
     }
-    return { x: 0, y: 0, sx: s.width / game.width, sy: s.height / game.height };
+    var fullscreen = d.add(NATIVE_FULLSCREEN).readU32() === 1;
+    var mode = fullscreen || d12Scaling.windowedScaled ? d12Scaling.mode : 'stretched';
+    var iw = gw, ih = gh;
+    var r = d12Scaling.resolution;
+    var hv = r.match(/h:\s*(\d+)\s*,\s*v:\s*(\d+)/), times = r.match(/^(\d+)x/);
+    if (hv !== null) {
+        iw = parseInt(hv[1], 10);
+        ih = parseInt(hv[2], 10);
+    } else if (times !== null) {
+        iw = gw * parseInt(times[1], 10);
+        ih = gh * parseInt(times[1], 10);
+    } else if (r !== 'unforced') {
+        iw = s.width;                       // max, desktop and the like: the output's size
+        ih = s.height;
+    }
+    var fits = Math.min(s.width / iw, s.height / ih), k;
+    if (mode.indexOf('stretched_') === 0) {
+        k = fits;
+    } else if (mode === 'centered') {
+        k = 1;
+    } else if (mode === 'centered_ar') {
+        k = Math.max(1, Math.floor(fits));
+    } else {
+        return { x: 0, y: 0, sx: s.width / gw, sy: s.height / gh };
+    }
+    var w = iw * k, h = ih * k;
+    return { x: (s.width - w) / 2, y: (s.height - h) / 2, sx: w / gw, sy: h / gh };
 }
 
 // Why backend 7 is final, '' while backend 12 may still come, or null on 12.
