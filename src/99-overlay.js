@@ -438,9 +438,11 @@ hook("overlayCursor", RVA.cursorShapeDraw, {
             var mouse = snapPtr(this.context.ecx);
             var x = mouse.add(OVERLAY_MOUSE_X).readS32();
             var y = mouse.add(OVERLAY_MOUSE_X + 4).readS32();
-            // Backend 12 draws the cursor itself above its layers.
-            var own = d12CursorWanted() && d12CursorTake(mouse, (args[1].toUInt32() & 0xFF) !== 0);
-            if (!own && overlayAt(x, y, OVERLAY_HIDES_CURSOR) === null) {
+            // Backend 12 draws the cursor itself above its layers, except
+            // over a layer that hides it.
+            var hides = overlayAt(x, y, OVERLAY_HIDES_CURSOR) !== null;
+            var own = !hides && d12CursorWanted() && d12CursorTake(mouse, (args[1].toUInt32() & 0xFF) !== 0);
+            if (!own && !hides) {
                 return;
             }
             var shape = mouse.add(OVERLAY_MOUSE_SHAPE).readPointer();
