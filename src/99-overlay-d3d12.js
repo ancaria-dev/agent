@@ -572,8 +572,9 @@ function d12OnPresent(sc) {
 }
 
 // Where the game's frame lies in the swap chain's, and its scale: layers are
-// placed in the game's pixels.  Stretched to the whole output for now; the
-// rectangle dgVoodoo fits the frame into is step 4 of docs/BACKEND12.md.
+// placed in the game's pixels.  A plain stretch to the whole output, seen
+// right at the owner's forced 2560x1600, windowed, and with display scaling;
+// dgVoodoo's scaling modes with bars are untried (docs/BACKEND12.md).
 function d12Fit(s) {
     var game = nativeDisplay();
     if (game === null || game.width === 0 || game.height === 0) {
