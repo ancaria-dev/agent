@@ -185,6 +185,15 @@ command("player.cheater", function () {
     return { cheater: heroFull.add(HERO_CHEAT).readU16() !== 0 ? 1 : 0 };
 });
 
+// Sets the mark or takes it away.  The game never takes it away itself, and
+// its checks may set it again (cEngine::save's anti-cheat pass, the console's
+// cheats).
+command("player.cheater_set", function (f) {
+    requireHero();
+    heroFull.add(HERO_CHEAT).writeU16(f.cheater === "1" ? 1 : 0);
+    return { cheater: heroFull.add(HERO_CHEAT).readU16() !== 0 ? 1 : 0 };
+});
+
 command("player.skill", function (f) {
     requireHero();
     var slot = parseInt(f.slot, 10);

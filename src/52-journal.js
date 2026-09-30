@@ -83,6 +83,29 @@ command("player.stats", function () {
     };
 });
 
+// The journal's resurrections and the clock the survival bonus runs on, both
+// plain counters of the statistics block: the game keeps no copy of them
+// elsewhere, and its own death handler (incrementResurrections) writes them
+// the same way.  sinceDeath is in milliseconds, as the game counts it.
+command("player.journal_set", function (f) {
+    var block = journalBlock();
+    if (f.resurrections !== undefined) {
+        var n = parseInt(f.resurrections, 10);
+        if (isNaN(n) || n < 0) {
+            throw new Error("Bad resurrection count " + f.resurrections + ".");
+        }
+        block.add(JOURNAL.resurrections).writeU32(n >>> 0);
+    }
+    if (f.sinceDeath !== undefined) {
+        var ms = parseInt(f.sinceDeath, 10);
+        if (isNaN(ms) || ms < 0 || ms > 0x7FFFFFFF) {
+            throw new Error("Bad time since death " + f.sinceDeath + ".");
+        }
+        block.add(JOURNAL.sinceDeath).writeU32(ms >>> 0);
+    }
+    return { ok: 1 };
+});
+
 // Sets the difficulties an exported hero will be offered the way the finale
 // does it (0x004AEE30 raises the current difficulty's count, 0x00424CF0):
 // the difficulty below the wanted one counts as completed at least once, and
