@@ -20,7 +20,8 @@
 //
 // The JVM learns the backend from the fields of every loading stage
 // (d12StageFields): backend (7 or 12), backend_luid_high, backend_luid_low,
-// backend_pid, backend_error, and backend_pending while nothing is decided.
+// backend_width and backend_height of the swap chain, backend_pid,
+// backend_error, and backend_pending while nothing is decided.
 // The first stage waits for the decision, so the Game stages' mods make their
 // layers on the right backend.  A decision after that goes out on its own as
 // the event overlay.backend with the same fields.
@@ -383,7 +384,6 @@ function d12Setup(sc) {
     d12.backend = 12;
     note('backend 12: swap chain ' + s.width + 'x' + s.height + ' format ' + s.format + ', adapter LUID ' +
          d12.luid.high + ':' + d12.luid.low);
-    d12Tell();
     return s;
 }
 
@@ -502,6 +502,7 @@ function d12OnPresent(sc) {
         if (d12.chain === null) {
             return;
         }
+        d12Tell();
     }
     var s = d12.chain;
     if (d12.retired.length > 0) {
@@ -634,8 +635,11 @@ function d12Why() {
 
 function d12Report() {
     var why = d12Why();
+    var on = d12.backend === 12 && d12.chain !== null;
     return {
         backend: d12.backend,
+        backend_width: on ? d12.chain.width : 0,
+        backend_height: on ? d12.chain.height : 0,
         backend_luid_high: d12.luid === null ? 0 : d12.luid.high,
         backend_luid_low: d12.luid === null ? 0 : d12.luid.low,
         backend_pid: Process.id,
