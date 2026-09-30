@@ -18,12 +18,20 @@
 // is signalled with it on the game's queue.  The game never waits on the CPU:
 // command allocators come from a ring that grows when all are busy.
 //
-//   overlay.backend  backend (7 or 12), luid_high, luid_low, pid, error
+// The JVM learns the backend from the fields of every loading stage
+// (d12StageFields): backend (7 or 12), backend_luid_high, backend_luid_low,
+// backend_pid, backend_error, and backend_pending while nothing is decided.
+// The first stage waits for the decision, so the Game stages' mods make their
+// layers on the right backend.  A decision after that goes out on its own as
+// the event overlay.backend with the same fields.
 
 var D12_GPU = 96;
 var D12_HANDLES = 100;
 var D12_SRV_MAX = 64;               // two descriptors a layer
 var D12_ALLOCATORS_MAX = 32;
+// How long the first loading stage waits for the backend.  The swap chain
+// was up before that stage in every run seen.
+var D12_DECIDE_MS = 3000;
 var D12_HLSL = [
     '#define RS "RootConstants(num32BitConstants=8, b0), DescriptorTable(SRV(t0)), StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR, addressU=TEXTURE_ADDRESS_CLAMP, addressV=TEXTURE_ADDRESS_CLAMP)"',
     'cbuffer C : register(b0) { float4 rect; float4 uv; };',
@@ -51,7 +59,9 @@ var d12 = {
     chain: null,
     luid: null,
     retired: [],
-    fns: {}
+    fns: {},
+    // The report the JVM has, as a string; null until the first stage.
+    told: null
 };
 
 function d12Guid(text) {
@@ -100,6 +110,7 @@ function d12Fail(what) {
     if (d12.error === null) {
         d12.error = what;
         note('backend 12 unavailable: ' + what);
+        d12Tell();
     }
 }
 
@@ -198,7 +209,7 @@ function d12Start() {
     return true;
 }
 
-// Every second until the game has loaded the system dxgi.dll and d3d12.dll.
+// Every 100 ms until the game has loaded the system dxgi.dll and d3d12.dll.
 var d12Poll = setInterval(function () {
     try {
         if (d12Start()) {
@@ -208,7 +219,7 @@ var d12Poll = setInterval(function () {
         clearInterval(d12Poll);
         d12Fail(e.message);
     }
-}, 1000);
+}, 100);
 
 // DIRECT queues seen executing, with their devices.  Held with AddRef.
 var d12QueueWatch = {
@@ -360,6 +371,7 @@ function d12Setup(sc) {
     d12.backend = 12;
     note('backend 12: swap chain ' + s.width + 'x' + s.height + ' format ' + s.format + ', adapter LUID ' +
          d12.luid.high + ':' + d12.luid.low);
+    d12Tell();
     return s;
 }
 
@@ -583,12 +595,62 @@ function d12Fit(s) {
     return { x: 0, y: 0, sx: s.width / game.width, sy: s.height / game.height };
 }
 
-command('overlay.backend', function () {
+// Why backend 7 is final, '' while backend 12 may still come, or null on 12.
+function d12Why() {
+    if (d12.backend === 12) {
+        return null;
+    }
+    if (d12.error !== null) {
+        return d12.error;
+    }
+    if (Object.keys(d12.notD3D12).length > 0) {
+        return 'the game presents without Direct3D 12';
+    }
+    if (Process.findModuleByName('d3d12.dll') === null) {
+        return 'the game has not loaded Direct3D 12';
+    }
+    return '';
+}
+
+function d12Report() {
+    var why = d12Why();
     return {
         backend: d12.backend,
-        luid_high: d12.luid === null ? 0 : d12.luid.high,
-        luid_low: d12.luid === null ? 0 : d12.luid.low,
-        pid: Process.id,
-        error: d12.error || ''
+        backend_luid_high: d12.luid === null ? 0 : d12.luid.high,
+        backend_luid_low: d12.luid === null ? 0 : d12.luid.low,
+        backend_pid: Process.id,
+        backend_error: why || '',
+        backend_pending: why === '' ? 1 : 0
     };
-});
+}
+
+// The backend in a stage's fields.  `wait`: the first held stage, on the game
+// thread, waits for the decision.  Thread.sleep lets Frida's thread and the
+// presenting thread run in the meantime.
+function d12StageFields(fields, wait) {
+    if (wait && d12.told === null) {
+        var until = Date.now() + D12_DECIDE_MS;
+        while (d12Why() === '' && Date.now() < until) {
+            Thread.sleep(0.02);
+        }
+    }
+    var report = d12Report();
+    d12.told = JSON.stringify(report);
+    for (var key in report) {
+        fields[key] = report[key];
+    }
+    return fields;
+}
+
+// A decision the JVM does not have yet, once a stage has told it anything.
+function d12Tell() {
+    if (d12.told === null) {
+        return;
+    }
+    var report = d12Report();
+    var text = JSON.stringify(report);
+    if (text !== d12.told) {
+        d12.told = text;
+        evt('overlay.backend', report);
+    }
+}

@@ -81,7 +81,7 @@ function stage(point, fields, label, labelSize) {
         }
     }
     try {
-        send({ type: "stage", id: seq, result: point, returns: fields || {} });
+        send({ type: "stage", id: seq, result: point, returns: d12StageFields(fields || {}, true) });
         while (stageAnswers[seq] === undefined) {
             var op = recv("stage", function (msg) {
                 stageAnswers[msg.seq] = true;
@@ -103,7 +103,7 @@ function stage(point, fields, label, labelSize) {
 // A stage nothing waits for: PostWorld, the world gone, a late attach.
 function stageNotice(point, fields) {
     if (askEnabled) {
-        send({ type: "stage", id: 0, result: point, returns: fields || {} });
+        send({ type: "stage", id: 0, result: point, returns: d12StageFields(fields || {}, false) });
     }
 }
 
