@@ -66,6 +66,9 @@ command("player.kill", function () {
 var SHEET_ATTRS = [0x10, 0x12, 0x14, 0x16, 0x18, 0x1A];
 var SHEET_ATTR_POINTS = 0x23;
 var SHEET_SKILLS = 0x2C;
+// The skill in each slot, 1 Heavenly Magic .. 33 Forge Lore: modifier id - 599.
+// Read from the exported hero files, where the sheet lies byte for byte.
+var SHEET_SKILL_IDS = 0x24;
 var SHEET_SKILL_SLOTS = 8;
 var SHEET_SKILL_POINTS = 0x42;
 var SHEET_MOVE = 0x40;
@@ -96,10 +99,14 @@ function attributesNow() {
 
 function skillsNow() {
     var levels = [];
+    var skills = [];
     for (var i = 0; i < SHEET_SKILL_SLOTS; i++) {
         levels.push(heroSheet.add(SHEET_SKILLS + i).readU8());
+        var id = heroSheet.add(SHEET_SKILL_IDS + i).readU8();
+        skills.push(id === 0 ? 0 : 599 + id);
     }
     return { levels: levels.join(","),
+             skills: skills.join(","),
              points: heroSheet.add(SHEET_SKILL_POINTS).readU16() };
 }
 
