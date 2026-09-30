@@ -115,16 +115,36 @@ command("player.attributes", function () {
     return attributesNow();
 });
 
-// Attributes are not among the anti-cheat's mirrored fields, so a plain write
-// followed by the game's own recalculation is the whole job.
+// The game keeps no attribute: CalcResults (0x00579AD1) rebuilds each on
+// load and on every level-up from the class's base, the level and the points
+// invested in it, then adds gear.  So a value is written as invested points,
+// and the shown total with it, gear kept, before the game's recalculation:
+// the next rebuild then arrives at the same number.  Attributes are not
+// among the anti-cheat's mirrored fields.
+var SHEET_INVESTED = 0x1C;
+var SHEET_BASE_ATTRS = 0x4A;
+var SHEET_LEVEL = 0x56;
+
+function attributeWithoutGear(index) {
+    var base = heroSheet.add(SHEET_BASE_ATTRS + 2 * index).readU16();
+    var level = heroSheet.add(SHEET_LEVEL).readU16();
+    return base + Math.floor(base * (level - 1) / 10) +
+           heroSheet.add(SHEET_INVESTED + index).readU8();
+}
+
 command("player.attribute", function (f) {
     requireHero();
     var index = parseInt(f.index, 10);
     if (isNaN(index) || index < 0 || index >= SHEET_ATTRS.length) {
         throw new Error("No attribute " + f.index + ".");
     }
-    var value = Math.max(0, Math.min(0xFFFF, parseInt(f.value, 10) || 0));
-    heroSheet.add(SHEET_ATTRS[index]).writeU16(value);
+    var invested = heroSheet.add(SHEET_INVESTED + index).readU8();
+    var bare = attributeWithoutGear(index);
+    var least = bare - invested;
+    var gear = Math.max(0, heroSheet.add(SHEET_ATTRS[index]).readU16() - bare);
+    var value = Math.max(least, Math.min(least + 0xFF, parseInt(f.value, 10) || 0));
+    heroSheet.add(SHEET_INVESTED + index).writeU8(value - least);
+    heroSheet.add(SHEET_ATTRS[index]).writeU16(Math.min(0xFFFF, value + gear));
     recalc();
     return attributesNow();
 });
