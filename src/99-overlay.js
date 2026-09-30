@@ -768,3 +768,7 @@ command("overlay.layers", function () {
     }
     return { ids: ids.join(","), error: overlayCError || "" };
 });
+
+// Built as the script loads, on Frida's thread: the first stage reports
+// whether layers can show at all, and building there would hold the game.
+overlayNatives();

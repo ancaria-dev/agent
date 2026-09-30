@@ -21,7 +21,8 @@
 // The JVM learns the backend from the fields of every loading stage
 // (d12StageFields): backend (7 or 12), backend_luid_high, backend_luid_low,
 // backend_width and backend_height of the swap chain, backend_pid,
-// backend_error, and backend_pending while nothing is decided.
+// backend_error, and backend_pending while nothing is decided.  Backend 0:
+// no layer can show, because backend 7's module failed to build.
 // The first stage waits for the decision, so the Game stages' mods make their
 // layers on the right backend.  A decision after that goes out on its own as
 // the event overlay.backend with the same fields.
@@ -634,10 +635,10 @@ function d12Why() {
 }
 
 function d12Report() {
-    var why = d12Why();
-    var on = d12.backend === 12 && d12.chain !== null;
+    var why = overlayCError !== null ? 'layers cannot show: ' + overlayCError : d12Why();
+    var on = overlayCError === null && d12.backend === 12 && d12.chain !== null;
     return {
-        backend: d12.backend,
+        backend: overlayCError !== null ? 0 : d12.backend,
         backend_width: on ? d12.chain.width : 0,
         backend_height: on ? d12.chain.height : 0,
         backend_luid_high: d12.luid === null ? 0 : d12.luid.high,
@@ -654,7 +655,7 @@ function d12Report() {
 function d12StageFields(fields, wait) {
     if (wait && d12.told === null) {
         var from = Date.now();
-        while (d12Why() === '' && Date.now() - from < D12_DECIDE_MS) {
+        while (overlayCError === null && d12Why() === '' && Date.now() - from < D12_DECIDE_MS) {
             Thread.sleep(0.02);
         }
         note('drawing backend ' + d12.backend + ' at the first stage, after ' + (Date.now() - from) + ' ms');
