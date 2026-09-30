@@ -13,9 +13,11 @@
 //
 // A GPU layer is a layer file whose +96 is 1; +100 and +104 are the game-side
 // handles of its two shared textures, +108 of its `ready` fence and +112 of
-// its `done` fence.  At Present the newest finished frame (ready's completed
-// value) is drawn from texture frame % 2 as one alpha-blended quad, and done
-// is signalled with it on the game's queue.  The game never waits on the CPU:
+// its `done` fence; +116 is 1 + the buffer holding a copy of a recent frame
+// for the alpha hit test, or 0 before the first copy.  At Present the newest
+// finished frame (ready's completed value) is drawn from texture frame % 2 as
+// one alpha-blended quad, and done is signalled with it on the game's queue.
+// The game never waits on the CPU:
 // command allocators come from a ring that grows when all are busy.
 //
 // The JVM learns the backend from the fields of every loading stage
@@ -29,6 +31,7 @@
 
 var D12_GPU = 96;
 var D12_HANDLES = 100;
+var D12_MASK = 116;                 // 1 + the buffer with the newest copied-back picture, or 0
 var D12_SRV_MAX = 64;               // two descriptors a layer
 var D12_ALLOCATORS_MAX = 32;
 // How long the first loading stage waits for the backend.  The swap chain

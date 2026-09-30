@@ -524,19 +524,28 @@ function overlayAt(x, y, flag, solid) {
 
 // Whether a layer's newest picture takes input at a point of it: its alpha
 // there above the layer's input alpha.  Java only writes the buffer that is
-// not front, so the front one holds that picture.
+// not front, so the front one holds that picture.  A GPU layer's picture is
+// in a texture: Java copies it back into the buffer D12_MASK names, at most
+// one copy behind, and until the first copy the whole rectangle counts.
 function overlaySolid(layer, lx, ly) {
-    // A GPU layer's pixels are not in memory here: the whole rectangle
-    // counts until a readback of its alpha exists (docs/BACKEND12.md).
-    if (layer.header < 128 || d12Owns(layer)) {
+    if (layer.header < 128) {
         return true;
     }
     var threshold = overlayRead(layer, OVERLAY_INPUT_ALPHA);
     if (threshold < 0) {
         return true;
     }
-    var front = overlayRead(layer, 20) & 1;
-    var pixel = front * layer.width * layer.height + ly * layer.width + lx;
+    var buffer;
+    if (d12Owns(layer)) {
+        var mask = overlayRead(layer, D12_MASK);
+        if (mask !== 1 && mask !== 2) {
+            return true;
+        }
+        buffer = mask - 1;
+    } else {
+        buffer = overlayRead(layer, 20) & 1;
+    }
+    var pixel = buffer * layer.width * layer.height + ly * layer.width + lx;
     return layer.view.add(layer.header + 4 * pixel + 3).readU8() > threshold;
 }
 
