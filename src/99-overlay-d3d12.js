@@ -106,12 +106,24 @@ function d12Release(obj) {
     }
 }
 
+// Backend 12 is off for the rest of the run.  Layers it drew go back to
+// backend 7, which shows their files' frames until the JVM draws new ones
+// there; their GPU objects go once our last draw with them is done.
 function d12Fail(what) {
-    if (d12.error === null) {
-        d12.error = what;
-        note('backend 12 unavailable: ' + what);
-        d12Tell();
+    if (d12.error !== null) {
+        return;
     }
+    d12.error = what;
+    if (d12.backend === 12) {
+        d12.backend = 7;
+        note('backend 12 failed, layers go back to backend 7: ' + what);
+        for (var id in overlayLayers) {
+            d12Retire(overlayLayers[id]);
+        }
+    } else {
+        note('backend 12 unavailable: ' + what);
+    }
+    d12Tell();
 }
 
 function d12SystemModule(name) {
@@ -474,6 +486,14 @@ function d12Barrier(s, res, before, after) {
 }
 
 function d12OnPresent(sc) {
+    if (d12.error !== null) {
+        // Removed device: the fence reads UINT64_MAX, so all of it goes.
+        var old = d12.chain;
+        if (old !== null && d12.retired.length > 0 && old.sc.equals(sc)) {
+            d12ReleaseRetired(old, d12Com(old.fence, 8, 'uint64', [])());
+        }
+        return;
+    }
     if (d12.notD3D12[sc.toString()]) {
         return;
     }
