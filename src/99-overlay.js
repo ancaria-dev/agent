@@ -425,7 +425,7 @@ hook("overlayDraw", RVA.cursorDraw, {
 
 // The top plane in the menu thread's frames, and the cursor over a layer.
 hook("overlayCursor", RVA.cursorShapeDraw, {
-    onEnter: function () {
+    onEnter: function (args) {
         this.mouse = null;
         if (!overlayAny()) {
             return;
@@ -438,7 +438,9 @@ hook("overlayCursor", RVA.cursorShapeDraw, {
             var mouse = snapPtr(this.context.ecx);
             var x = mouse.add(OVERLAY_MOUSE_X).readS32();
             var y = mouse.add(OVERLAY_MOUSE_X + 4).readS32();
-            if (overlayAt(x, y, OVERLAY_HIDES_CURSOR) === null) {
+            // Backend 12 draws the cursor itself above its layers.
+            var own = d12CursorWanted() && d12CursorTake(mouse, (args[1].toUInt32() & 0xFF) !== 0);
+            if (!own && overlayAt(x, y, OVERLAY_HIDES_CURSOR) === null) {
                 return;
             }
             var shape = mouse.add(OVERLAY_MOUSE_SHAPE).readPointer();

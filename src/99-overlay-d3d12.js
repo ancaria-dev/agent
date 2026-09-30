@@ -38,8 +38,8 @@ var D12_ALLOCATORS_MAX = 32;
 // was up before that stage in every run seen.
 var D12_DECIDE_MS = 3000;
 var D12_HLSL = [
-    '#define RS "RootConstants(num32BitConstants=8, b0), DescriptorTable(SRV(t0)), StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR, addressU=TEXTURE_ADDRESS_CLAMP, addressV=TEXTURE_ADDRESS_CLAMP)"',
-    'cbuffer C : register(b0) { float4 rect; float4 uv; };',
+    '#define RS "RootConstants(num32BitConstants=12, b0), DescriptorTable(SRV(t0)), StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR, addressU=TEXTURE_ADDRESS_CLAMP, addressV=TEXTURE_ADDRESS_CLAMP)"',
+    'cbuffer C : register(b0) { float4 rect; float4 uv; float4 tint; };',
     'Texture2D layer : register(t0);',
     'SamplerState smooth : register(s0);',
     'struct V { float4 p : SV_Position; float2 t : TEXCOORD; };',
@@ -47,7 +47,7 @@ var D12_HLSL = [
     '    float2 c = float2(i & 1, i >> 1);',
     '    V o; o.p = float4(lerp(rect.xy, rect.zw, c), 0, 1); o.t = lerp(uv.xy, uv.zw, c); return o;',
     '}',
-    '[RootSignature(RS)] float4 ps(V v) : SV_Target { return layer.Sample(smooth, v.t); }'
+    '[RootSignature(RS)] float4 ps(V v) : SV_Target { return layer.Sample(smooth, v.t) * tint; }'
 ].join('\n');
 
 var d12 = {
@@ -66,7 +66,11 @@ var d12 = {
     retired: [],
     fns: {},
     // The report the JVM has, as a string; null until the first stage.
-    told: null
+    told: null,
+    // The cursor shape mouse::draw left to this frame's Present, and each
+    // texture handle's picture (null when unreadable).
+    cursor: null,
+    cursorPixels: {}
 };
 
 function d12Guid(text) {
@@ -314,24 +318,8 @@ function d12Setup(sc) {
     r = d12Com(dev, 16, 'int', ['uint32', 'pointer', 'uint32', 'pointer', 'pointer'])(0, d12.shaders.rs.at, d12.shaders.rs.size, d12.iid.root, root);
     if (r < 0) throw new Error('CreateRootSignature ' + d12Hr(r));
     s.root = root.readPointer();
-    var p = Memory.alloc(572);
-    for (var k = 0; k < 572; k += 4) p.add(k).writeU32(0);
-    p.writePointer(s.root);
-    p.add(4).writePointer(d12.shaders.vs.at); p.add(8).writeU32(d12.shaders.vs.size);
-    p.add(12).writePointer(d12.shaders.ps.at); p.add(16).writeU32(d12.shaders.ps.size);
-    [1, 0, 2, 6, 1, 2, 6, 1, 4, 0xF].forEach(function (v, j) { p.add(72 + 4 * j).writeU32(v); });
-    p.add(392).writeU32(0xFFFFFFFF);
-    [3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0].forEach(function (v, j) { p.add(396 + 4 * j).writeU32(v); });
-    p.add(448).writeU32(8);
-    [1, 1, 1, 8].forEach(function (v, j) { p.add(460 + 4 * j).writeU32(v); p.add(476 + 4 * j).writeU32(v); });
-    p.add(504).writeU32(3);
-    p.add(508).writeU32(1);
-    p.add(512).writeU32(s.format);
-    p.add(548).writeU32(1);
-    var pso = d12Out();
-    r = d12Com(dev, 10, 'int', ['pointer', 'pointer', 'pointer'])(p, d12.iid.pso, pso);
-    if (r < 0) throw new Error('CreateGraphicsPipelineState ' + d12Hr(r));
-    s.pso = pso.readPointer();
+    s.pso = d12Pso(dev, s, 6);      // INV_SRC_ALPHA: premultiplied over
+    s.psoAdd = d12Pso(dev, s, 2);   // ONE: the cursor's glow adds light
     // Descriptor heaps: one RTV per back buffer, two SRVs per layer.
     var heapDesc = Memory.alloc(16);
     heapDesc.writeU32(2); heapDesc.add(4).writeU32(s.buffers); heapDesc.add(8).writeU32(0); heapDesc.add(12).writeU32(0);
@@ -380,7 +368,8 @@ function d12Setup(sc) {
     [0, 0, s.width, s.height, 0, 1].forEach(function (v, j) { s.viewport.add(4 * j).writeFloat(v); });
     s.scissor = Memory.alloc(16);
     [0, 0, s.width, s.height].forEach(function (v, j) { s.scissor.add(4 * j).writeS32(v); });
-    s.constants = Memory.alloc(32);
+    s.constants = Memory.alloc(48);
+    s.cursors = {};
     s.rtvs = Memory.alloc(4);
     var luid = Memory.alloc(8);
     d12Com(dev, 43, 'void', ['pointer'])(luid);
@@ -533,6 +522,8 @@ function d12OnPresent(sc) {
             shown.push({ layer: layer, g: g, frame: frame });
         }
     }
+    var cursor = d12.cursor;
+    d12.cursor = null;
     if (shown.length === 0) {
         return;
     }
@@ -572,6 +563,7 @@ function d12OnPresent(sc) {
     d12Com(s.allocators[slot], 8, 'int', [])();
     var l = s.list;
     d12Com(l, 10, 'int', ['pointer', 'pointer'])(s.allocators[slot], NULL);
+    var cursorTexture = cursor === null ? null : d12CursorTexture(s, l, cursor.handle);
     d12Barrier(s, buffer, 0, 4);
     s.rtvs.writeU32(rtv);
     d12Com(l, 46, 'void', ['uint32', 'pointer', 'int', 'pointer'])(1, s.rtvs, 0, NULL);
@@ -586,14 +578,12 @@ function d12OnPresent(sc) {
         var item = shown[n];
         var x = overlayRead(item.layer, 32), y = overlayRead(item.layer, 36);
         var x0 = fit.x + x * fit.sx, y0 = fit.y + y * fit.sy;
-        var x1 = x0 + item.layer.width * fit.sx, y1 = y0 + item.layer.height * fit.sy;
-        var c = s.constants;
-        [2 * x0 / s.width - 1, 1 - 2 * y0 / s.height, 2 * x1 / s.width - 1, 1 - 2 * y1 / s.height,
-         0, 0, item.layer.width / item.g.width, item.layer.height / item.g.height].forEach(function (v, j) { c.add(4 * j).writeFloat(v); });
-        d12Com(l, 36, 'void', ['uint32', 'uint32', 'pointer', 'uint32'])(0, 8, c, 0);
-        var which = (item.frame.toNumber() % 2);
-        d12Com(l, 32, 'void', ['uint32', 'uint64'])(1, s.srvGpu.add(uint64((2 * item.g.slot + which) * s.srvStep)));
-        d12Com(l, 12, 'void', ['uint32', 'uint32', 'uint32', 'uint32'])(4, 1, 0, 0);
+        d12Quad(s, l, x0, y0, x0 + item.layer.width * fit.sx, y0 + item.layer.height * fit.sy,
+                [0, 0, item.layer.width / item.g.width, item.layer.height / item.g.height], 1,
+                2 * item.g.slot + (item.frame.toNumber() % 2));
+    }
+    if (cursorTexture !== null) {
+        d12CursorDraw(s, l, fit, cursor, cursorTexture);
     }
     d12Barrier(s, buffer, 4, 0);
     d12Com(l, 9, 'int', [])();
@@ -606,6 +596,231 @@ function d12OnPresent(sc) {
         d12Com(s.queue, 14, 'int', ['pointer', 'uint64'])(shown[m].g.done, shown[m].frame);
     }
     d12Release(buffer);
+}
+
+// One pipeline over the layer shaders, blending premultiplied colour onto
+// the back buffer with DestBlend `dest` (D3D12_BLEND: 6 INV_SRC_ALPHA, 2 ONE).
+function d12Pso(dev, s, dest) {
+    var p = Memory.alloc(572);
+    for (var k = 0; k < 572; k += 4) p.add(k).writeU32(0);
+    p.writePointer(s.root);
+    p.add(4).writePointer(d12.shaders.vs.at); p.add(8).writeU32(d12.shaders.vs.size);
+    p.add(12).writePointer(d12.shaders.ps.at); p.add(16).writeU32(d12.shaders.ps.size);
+    [1, 0, 2, dest, 1, 2, dest, 1, 4, 0xF].forEach(function (v, j) { p.add(72 + 4 * j).writeU32(v); });
+    p.add(392).writeU32(0xFFFFFFFF);
+    [3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0].forEach(function (v, j) { p.add(396 + 4 * j).writeU32(v); });
+    p.add(448).writeU32(8);
+    [1, 1, 1, 8].forEach(function (v, j) { p.add(460 + 4 * j).writeU32(v); p.add(476 + 4 * j).writeU32(v); });
+    p.add(504).writeU32(3);
+    p.add(508).writeU32(1);
+    p.add(512).writeU32(s.format);
+    p.add(548).writeU32(1);
+    var pso = d12Out();
+    var r = d12Com(dev, 10, 'int', ['pointer', 'pointer', 'pointer'])(p, d12.iid.pso, pso);
+    if (r < 0) throw new Error('CreateGraphicsPipelineState ' + d12Hr(r));
+    return pso.readPointer();
+}
+
+// One textured quad in swap chain pixels, sampling descriptor `srv` of the
+// heap over `uv` (u0, v0, u1, v1), its colour times `tint`.
+function d12Quad(s, l, x0, y0, x1, y1, uv, tint, srv) {
+    var c = s.constants;
+    [2 * x0 / s.width - 1, 1 - 2 * y0 / s.height, 2 * x1 / s.width - 1, 1 - 2 * y1 / s.height,
+     uv[0], uv[1], uv[2], uv[3], tint, tint, tint, tint].forEach(function (v, j) { c.add(4 * j).writeFloat(v); });
+    d12Com(l, 36, 'void', ['uint32', 'uint32', 'pointer', 'uint32'])(0, 12, c, 0);
+    d12Com(l, 32, 'void', ['uint32', 'uint64'])(1, s.srvGpu.add(uint64(srv * s.srvStep)));
+    d12Com(l, 12, 'void', ['uint32', 'uint32', 'uint32', 'uint32'])(4, 1, 0, 0);
+}
+
+// Backend 12's own cursor.  A layer drawn at Present covers the game's
+// cursor, which the game drew into its frame before.  So while one of them
+// shows, mouse::draw (99-overlay.js) leaves the game's cursor out and hands
+// its shape to d12CursorTake, and Present draws it above every layer, as
+// mouse::draw would have: a 64x64 quad at the mouse plus the shape's offset,
+// and for the glow 49 more at alpha 8, added, moved -6..6 in steps of 2
+// (mappings: mouse shape draw).  The pictures come from the game's own
+// surfaces, read once per texture handle, so a loose .\PAK\MOUSE_*.TGA shows
+// too.  A dragged item's 3D model cannot be drawn here: the game draws it.
+var D12_CURSOR = 64;
+var D12_GLOW = 8 / 255;
+var d12TextureGet = new NativeFunction(at(RVA.textureGet), 'pointer', ['pointer', 'int', 'int'], { abi: 'thiscall' });
+
+// Whether backend 12 draws the cursor this frame: one of its layers shows.
+function d12CursorWanted() {
+    if (d12.backend !== 12 || d12.chain === null) {
+        return false;
+    }
+    var all = overlayShownAll(false);
+    for (var i = 0; i < all.length; i++) {
+        if (d12Owns(all[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// At mouse::draw's entry: records the shape the game is about to draw for
+// this frame's Present.  False when the game must draw it itself.
+function d12CursorTake(mouse, glow) {
+    var shape = mouse.add(0x64).readPointer();
+    if (shape.isNull() || (shape.readU16() & 2) !== 0) {
+        return false;
+    }
+    var handle = shape.add(0xC).readU32();
+    if (!(handle in d12.cursorPixels)) {
+        d12.cursorPixels[handle] = d12CursorPixels(handle);
+    }
+    if (d12.cursorPixels[handle] === null) {
+        return false;
+    }
+    d12.cursor = {
+        handle: handle,
+        x: mouse.add(4).readS32() + shape.add(2).readS16(),
+        y: mouse.add(8).readS32() + shape.add(4).readS16(),
+        uv: [shape.add(0x10).readFloat(), shape.add(0x14).readFloat(), shape.add(0x18).readFloat(), shape.add(0x1C).readFloat()],
+        // As mouse::draw sets the shape's bit 0: its argument, and no item held.
+        glow: glow && mouse.add(0x68).readU32() === 0
+    };
+    return true;
+}
+
+// A texture's picture as premultiplied RGBA bytes, read from the game's
+// surface (Lock slot 25 read-only, Unlock slot 32), or null.
+function d12CursorPixels(handle) {
+    try {
+        var tex = d12TextureGet(ptr(VA.textureMgr).readPointer(), handle, 0);
+        if (tex.isNull()) {
+            return null;
+        }
+        var surface = tex.add(0x14).readPointer();
+        var desc = Memory.alloc(124);
+        desc.writeU32(124);
+        if (d12Com(surface, 25, 'int', ['pointer', 'pointer', 'uint32', 'pointer'])(NULL, desc, 0x1 | 0x10, NULL) !== 0) {
+            return null;
+        }
+        var h = desc.add(8).readU32(), w = desc.add(12).readU32(), pitch = desc.add(16).readS32();
+        var bytes = desc.add(84).readU32() / 8;
+        var masks = [desc.add(88).readU32(), desc.add(92).readU32(), desc.add(96).readU32(), desc.add(100).readU32()];
+        var rows = new DataView(desc.add(36).readPointer().readByteArray(pitch * h));
+        d12Com(surface, 32, 'int', ['pointer'])(NULL);
+        if (bytes !== 2 && bytes !== 4) {
+            return null;
+        }
+        var out = new Uint8Array(w * h * 4);
+        for (var y = 0; y < h; y++) {
+            for (var x = 0; x < w; x++) {
+                var v = bytes === 2 ? rows.getUint16(y * pitch + 2 * x, true) : rows.getUint32(y * pitch + 4 * x, true);
+                var a = d12Channel(v, masks[3]);
+                for (var k = 0; k < 3; k++) {
+                    out[4 * (y * w + x) + k] = Math.round(d12Channel(v, masks[k]) * a / 255);
+                }
+                out[4 * (y * w + x) + 3] = a;
+            }
+        }
+        return { width: w, height: h, bytes: out.buffer };
+    } catch (e) {
+        note('cursor picture ' + handle + ': ' + e.message);
+        return null;
+    }
+}
+
+function d12Channel(v, mask) {
+    if (mask === 0) {
+        return 255;
+    }
+    var m = mask >>> 0, shift = 0;
+    while ((m & 1) === 0) {
+        m >>>= 1;
+        shift++;
+    }
+    return Math.round((((v >>> 0) & mask) >>> shift) * 255 / m);
+}
+
+// The cursor's texture on this swap chain's device: made, uploaded and
+// moved to PIXEL_SHADER_RESOURCE on list `l` the first time.  Null when the
+// heap has no descriptor left.
+function d12CursorTexture(s, l, handle) {
+    var known = s.cursors[handle];
+    if (known !== undefined) {
+        return known;
+    }
+    var pic = d12.cursorPixels[handle];
+    if (pic === null || pic === undefined || s.srvFree.length === 0) {
+        return null;
+    }
+    var dev = s.device;
+    var heap = Memory.alloc(20);
+    heap.writeU32(1);                                            // DEFAULT
+    var desc = Memory.alloc(56);
+    for (var k = 0; k < 56; k += 4) desc.add(k).writeU32(0);
+    desc.writeU32(3);                                            // TEXTURE2D
+    desc.add(16).writeU32(pic.width);
+    desc.add(24).writeU32(pic.height);
+    desc.add(28).writeU16(1);
+    desc.add(30).writeU16(1);
+    desc.add(32).writeU32(28);                                   // R8G8B8A8_UNORM
+    desc.add(36).writeU32(1);
+    var tex = d12Out();
+    var create = d12Com(dev, 27, 'int', ['pointer', 'uint32', 'pointer', 'uint32', 'pointer', 'pointer', 'pointer']);
+    if (create(heap, 0, desc, 0x400 /* COPY_DEST */, NULL, d12.iid.resource, tex) < 0) {
+        return null;
+    }
+    var pitch = Math.ceil(pic.width * 4 / 256) * 256;
+    heap.writeU32(2);                                            // UPLOAD
+    for (k = 0; k < 56; k += 4) desc.add(k).writeU32(0);
+    desc.writeU32(1);                                            // BUFFER
+    desc.add(16).writeU32(pitch * pic.height);
+    desc.add(24).writeU32(1);
+    desc.add(28).writeU16(1);
+    desc.add(30).writeU16(1);
+    desc.add(36).writeU32(1);
+    desc.add(44).writeU32(1);                                    // ROW_MAJOR
+    var upload = d12Out();
+    if (create(heap, 0, desc, 0xAC3 /* GENERIC_READ */, NULL, d12.iid.resource, upload) < 0) {
+        d12Release(tex.readPointer());
+        return null;
+    }
+    var mapped = d12Out();
+    var range = Memory.alloc(8);
+    range.writeU32(0); range.add(4).writeU32(0);
+    d12Com(upload.readPointer(), 8, 'int', ['uint32', 'pointer', 'pointer'])(0, range, mapped);
+    var rows = new Uint8Array(pic.bytes);
+    for (var y = 0; y < pic.height; y++) {
+        mapped.readPointer().add(y * pitch).writeByteArray(rows.slice(y * pic.width * 4, (y + 1) * pic.width * 4).buffer);
+    }
+    range.add(4).writeU32(pitch * pic.height);
+    d12Com(upload.readPointer(), 9, 'void', ['uint32', 'pointer'])(0, range);
+    // D3D12_TEXTURE_COPY_LOCATION on x86: resource, type, then the union at +8.
+    var into = Memory.alloc(40), from = Memory.alloc(40);
+    into.writePointer(tex.readPointer()); into.add(4).writeU32(0); into.add(8).writeU32(0);
+    from.writePointer(upload.readPointer()); from.add(4).writeU32(1);
+    from.add(8).writeU32(0); from.add(12).writeU32(0);
+    from.add(16).writeU32(28); from.add(20).writeU32(pic.width); from.add(24).writeU32(pic.height);
+    from.add(28).writeU32(1); from.add(32).writeU32(pitch);
+    d12Com(l, 16, 'void', ['pointer', 'uint32', 'uint32', 'uint32', 'pointer', 'pointer'])(into, 0, 0, 0, from, NULL);
+    d12Barrier(s, tex.readPointer(), 0x400, 0x80);
+    var slot = s.srvFree.pop();
+    d12Com(dev, 18, 'void', ['pointer', 'pointer', 'uint32'])(tex.readPointer(), NULL, s.srvCpu + 2 * slot * s.srvStep);
+    known = { texture: tex.readPointer(), upload: upload.readPointer(), srv: 2 * slot };
+    s.cursors[handle] = known;
+    return known;
+}
+
+function d12CursorDraw(s, l, fit, c, t) {
+    var x0 = fit.x + c.x * fit.sx, y0 = fit.y + c.y * fit.sy;
+    var w = D12_CURSOR * fit.sx, h = D12_CURSOR * fit.sy;
+    d12Quad(s, l, x0, y0, x0 + w, y0 + h, c.uv, 1, t.srv);
+    if (!c.glow) {
+        return;
+    }
+    d12Com(l, 25, 'void', ['pointer'])(s.psoAdd);
+    for (var dy = -6; dy <= 6; dy += 2) {
+        for (var dx = -6; dx <= 6; dx += 2) {
+            var gx = x0 + dx * fit.sx, gy = y0 + dy * fit.sy;
+            d12Quad(s, l, gx, gy, gx + w, gy + h, c.uv, D12_GLOW, t.srv);
+        }
+    }
+    d12Com(l, 25, 'void', ['pointer'])(s.pso);
 }
 
 // Where the game's frame lies in the swap chain's, and its scale: layers are
