@@ -307,10 +307,7 @@ hook("areaKill", RVA.areaKill, {
 // The campaign and the difficulty are the game's own globals: cEngine::load
 // sets both from the save, the main menu and the hero select from their
 // choices.  Outside a world they only remember the last choice, so they are
-// sent while there is a hero.  Hardcore is the save's flag in the player's
-// statistics block (cStats flag 4), read through the journal's own lookup
-// when that module is loaded.
-var WORLD_HARDCORE = 0x5708;       // cStats flag 4
+// sent while there is a hero.
 
 // The world's pause: byte [timer+0], which only timer::setPaused writes.  The
 // Esc menu, the options, the save menu and the world map pause the world
@@ -361,11 +358,6 @@ command("world.state", function () {
                 out[k] = fields[k];
             }
         } catch (e) {}
-        if (typeof journalBlock === "function") {
-            try {
-                out.hardcore = journalBlock().add(WORLD_HARDCORE).readU8() !== 0 ? 1 : 0;
-            } catch (e) {}
-        }
     }
     return out;
 });
