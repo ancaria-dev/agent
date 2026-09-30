@@ -154,6 +154,20 @@ command("player.skills", function () {
     return skillsNow();
 });
 
+// The hero's name, the one the hero select and the saves show: the game's
+// getName (0x0044A600), which answers the class's name for a hero never renamed.
+var heroNameFn = null;
+
+command("player.name", function () {
+    requireHero();
+    if (heroNameFn === null) {
+        heroNameFn = new NativeFunction(at(RVA.itemName), "pointer", ["pointer"],
+                                        { abi: "thiscall" });
+    }
+    var p = heroNameFn(heroFull);
+    return { name: p.isNull() ? "" : p.readUtf16String(64) };
+});
+
 // The mark cheats leave on the hero, the one that turns it into a rabbit: the
 // word the creature's property 0x24 tests (0x0055DC03), which an exported
 // hero's card copies.
