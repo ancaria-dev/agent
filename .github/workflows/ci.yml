@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ancaria-dev/mappings
+          ref: master
+          path: mappings
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: mappings.json is current
+        working-directory: mappings
+        run: python mappings.generator.py --check
+
+      - name: Generate the address table
+        run: python tools/addr.py mappings
+
+      - name: The agent notices the wrong game build
+        run: node tests/buildcheck.js
+
+      - name: Test
+        run: node --test "tests/*.test.mjs"
+
+      - name: Pack
+        run: node tools/pack.mjs
