@@ -10,6 +10,8 @@
 
 # agent
 
+[![Lines of code](https://img.shields.io/endpoint?url=https%3A%2F%2Fancaria.dev%2Ffiles%2Fbadges%2Fagent.json)](https://github.com/ancaria-dev/agent)
+
 Das JavaScript, das ancaria in Sacred Gold einschleust, für alle, die dem
 Loader Hooks oder Events hinzufügen.
 
