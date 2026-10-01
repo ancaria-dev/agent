@@ -16,7 +16,6 @@
 var ITEM = {
     ref: 0x0C,
     type: 0x10,
-    percent: 0x119,
     minLevel: 0x12C,
     level: 0x131,
     // Words, not bytes: a sword set to 150 read 150 here, and the damage words
@@ -185,7 +184,6 @@ function itemFields(ref) {
             xmax: obj.add(ITEM.damageMax + 6).readU16(),
             prot: obj.add(ITEM.protectionA).readU8() +
                   obj.add(ITEM.protectionB).readU8(),
-            pct: obj.add(ITEM.percent).readU8(),
             price: obj.add(ITEM.price).readU32() >>> 0,
             mods: readMods(obj),
             // Only when the two copies disagree, which on an untouched item
@@ -213,7 +211,7 @@ function itemFields(ref) {
 // not need a new one per field.  The second number is the width in bytes.
 var WRITABLE = { level: [ITEM.level, 1], min: [ITEM.minLevel, 1],
                  atk: [ITEM.attack, 2], def: [ITEM.defense, 2],
-                 pct: [ITEM.percent, 1], price: [ITEM.price, 4],
+                 price: [ITEM.price, 4],
                  pmin: [ITEM.damageMin, 2], fmin: [ITEM.damageMin + 2, 2],
                  mmin: [ITEM.damageMin + 4, 2], xmin: [ITEM.damageMin + 6, 2],
                  pmax: [ITEM.damageMax, 2], fmax: [ITEM.damageMax + 2, 2],
