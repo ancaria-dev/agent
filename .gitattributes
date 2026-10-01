@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+*.ps1 text eol=crlf linguist-language=PowerShell
+*.zip binary
+
+# Ignored, so normally absent; this still applies if it is ever force-added.
+src/gen/** linguist-generated=true

@@ -1,0 +1,18 @@
+# Written by tools/addr.py and tools/pack.mjs.
+src/gen/
+dist/
+build/
+
+.local.settings
+
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+
+.idea/
+*.iml
+.vscode/
+
+.DS_Store
+Thumbs.db
