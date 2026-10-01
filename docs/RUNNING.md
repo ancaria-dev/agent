@@ -54,11 +54,11 @@ running, and every address belongs to the first of those. On anything else the
 agent says so on the console and carries on:
 
 ```
-[agent] !! this is not the game build Coderpack's addresses were found in.
-[agent] !! expected pureHD.exe 2.0.2.118, found Sacred.exe. 38 of 38 hook
-           sites hold different instructions (commitStats, expWrite, ...).
-[agent] !! hooking it anyway, at whatever those addresses now point at. Mods
-           may not behave as expected.
+[agent] !! This isn’t the game build where Coderpack’s addresses were found.
+[agent] !! Expected pureHD.exe 2.0.2.118, found Sacred.exe. 65 of 65 hook sites
+           hold different instructions (addExperience, areaKill, artRaise, busyReact, …).
+[agent] !! Hooking it anyway at the current addresses. Mods may not behave as
+           expected.
 ```
 
 Those three lines are the reason to stop reading a crash as a hook bug.
