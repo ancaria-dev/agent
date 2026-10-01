@@ -26,23 +26,6 @@ gilt für `pureHD.exe` 2.0.2.118. Ein Release backt die Adressen ein und liefert
 den Agent verkleinert als `agent.zip` aus. Der Launcher lädt ihn herunter, zum
 Spielen installierst du also nichts von Hand.
 
-## Erste Schritte
-
-So läuft dein eigener Agent im Spiel:
-
-1. Klone [mappings](https://github.com/ancaria-dev/mappings) neben dieses
-   Repository oder lass `tools/addr.py` es herunterladen.
-2. Leg `.local.settings` mit dem Spielordner an:
-   `sacred=D:\SteamLibrary\steamapps\common\Sacred Gold`.
-3. Starte `pwsh tools/install.ps1`. Das Skript erzeugt die Adressen, packt den
-   Agent und ersetzt `<game>/launcher/agent/`.
-4. Starte das Spiel aus dem Launcher. Läuft es schon, schließ es vorher: Ein
-   laufendes Spiel behält seinen alten Agent.
-
-Bevor ein neuer Hook rausgeht, prüf ihn mit `python tools/hooksafe.py` an
-deinem Spiel. [docs/RUNNING.md](docs/RUNNING.md) zeigt, wie du einen Absturz
-auf ein Modul oder eine Stelle eingrenzt.
-
 ## Was drin ist
 
 | Pfad | Was es ist |
@@ -84,19 +67,6 @@ node tools/pack.mjs               schreibt dist/agent.zip
 `addr.py` sucht `mappings.json` in dieser Reihenfolge: ein Pfad als Argument,
 `$AGENT_MAPPINGS`, das benachbarte `../mappings`, dann GitHub in der Revision
 aus `.mappings-ref`.
-
-## Releases
-
-Ein Release ist der Button `Release` in Actions: Du gibst eine Version ein und
-auf Wunsch die mappings-Version, die eingebacken wird. Leer heißt: das neueste
-mappings-Release. Der Workflow prüft die Registry, führt die Tests aus und
-hängt `agent.zip` an ein GitHub-Release.
-
-[devops](https://github.com/ancaria-dev/devops) startet dieses Release nach
-jedem mappings-Release und aktualisiert danach das Manifest des Launchers.
-Details stehen in der
-[CONTRIBUTING](https://github.com/ancaria-dev/.github/blob/master/CONTRIBUTING.DE.md)
-im Wurzel-Repository.
 
 ## Lizenz
 

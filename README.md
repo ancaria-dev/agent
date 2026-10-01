@@ -25,24 +25,6 @@ Frida запускает агента внутри процесса игры. А
 в сжатом виде как `agent.zip`. Его скачивает лаунчер, так что для игры ничего
 ставить вручную не нужно.
 
-## Как начать
-
-Чтобы запустить в игре своего агента:
-
-1. Склонируйте [mappings](https://github.com/ancaria-dev/mappings) рядом с этим
-   репозиторием или дайте `tools/addr.py` скачать его.
-2. Создайте `.local.settings` с папкой игры:
-   `sacred=D:\SteamLibrary\steamapps\common\Sacred Gold`.
-3. Запустите `pwsh tools/install.ps1`. Скрипт создаст адреса, упакует агента и
-   заменит `<game>/launcher/agent/`.
-4. Запустите игру из лаунчера. Если она уже работает, сначала закройте её:
-   запущенная игра держит старого агента.
-
-Перед тем как выпустить новый хук, проверьте его командой
-`python tools/hooksafe.py` на своей копии игры. В
-[docs/RUNNING.md](docs/RUNNING.md) описано, как сузить причину падения до
-одного модуля или одной точки.
-
 ## Что внутри
 
 | Путь | Что это |
@@ -85,18 +67,6 @@ node tools/pack.mjs               пишет dist/agent.zip
 `addr.py` ищет `mappings.json` в таком порядке: путь из аргумента,
 `$AGENT_MAPPINGS`, соседний `../mappings`, затем GitHub на ревизии из
 `.mappings-ref`.
-
-## Релизы
-
-Релиз — это кнопка `Release` в Actions: вы вводите версию и, если нужно,
-версию mappings, которую вшить. Пустое поле означает последний релиз mappings.
-Workflow проверяет реестр, запускает тесты и прикладывает `agent.zip` к
-GitHub Release.
-
-[devops](https://github.com/ancaria-dev/devops) запускает этот релиз после
-каждого релиза mappings и затем обновляет манифест лаунчера. Подробности — в
-корневом
-[CONTRIBUTING](https://github.com/ancaria-dev/.github/blob/master/CONTRIBUTING.md).
 
 ## Лицензия
 
