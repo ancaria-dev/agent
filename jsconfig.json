@@ -1,7 +1,8 @@
 {
-    // The agent is not an application. tools/build.ps1 concatenates every file
-    // under src/ in file-name order into one script and Frida injects it into
-    // the game, where it runs on QuickJS.
+    // The agent is not an application. tools/pack.mjs minifies src/gen/addr.js
+    // and every numbered file under src/; the host (protocol.exe) concatenates
+    // them in file-name order into one script and Frida injects it into the
+    // game, where it runs on QuickJS.
     //
     // Three consequences the editor has to be told about:
     //
