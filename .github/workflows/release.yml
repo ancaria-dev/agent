@@ -1,0 +1,81 @@
+name: release
+run-name: Release ${{ inputs.version }}${{ inputs.train != '' && format(' · train {0}', inputs.train) || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version: { description: Version, required: true, type: string }
+      notify: { description: Propagate downstream and refresh meta.json, type: boolean, default: true }
+      train: { description: Train id (set by devops), type: string, default: '' }
+      mappings: { description: Mappings version to bake in (empty = latest mappings release), type: string, default: '' }
+
+concurrency: { group: release, cancel-in-progress: false }
+
+permissions: { contents: write }
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: prepare
+        uses: ancaria-dev/devops/.github/actions/prepare@master
+        with:
+          version: ${{ inputs.version }}
+
+      - name: Resolve the mappings version
+        id: mappings
+        if: steps.prepare.outputs.done != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAPPINGS: ${{ inputs.mappings }}
+        run: |
+          if [ -z "$MAPPINGS" ]; then
+            MAPPINGS=$(gh release view --repo ancaria-dev/mappings --json tagName -q .tagName 2>/dev/null || true)
+          fi
+          if [ -z "$MAPPINGS" ]; then
+            echo "ref=master" >> "$GITHUB_OUTPUT"
+            echo "label=master (mappings has no release yet)" >> "$GITHUB_OUTPUT"
+            echo "::warning::ancaria-dev/mappings has no release yet, so master is baked in"
+          else
+            echo "ref=v${MAPPINGS#v}" >> "$GITHUB_OUTPUT"
+            echo "label=${MAPPINGS#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.prepare.outputs.done != 'true'
+        with:
+          repository: ancaria-dev/mappings
+          ref: ${{ steps.mappings.outputs.ref }}
+          path: mappings
+
+      - uses: actions/setup-node@v6
+        if: steps.prepare.outputs.done != 'true'
+        with:
+          node-version: '24'
+
+      - name: mappings.json is current
+        if: steps.prepare.outputs.done != 'true'
+        working-directory: mappings
+        run: python mappings.generator.py --check
+
+      - name: Build and test
+        if: steps.prepare.outputs.done != 'true'
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          python tools/addr.py mappings
+          node tests/buildcheck.js
+          node --test "tests/*.test.mjs"
+          node tools/pack.mjs --version "$VERSION"
+
+      - if: steps.prepare.outputs.done != 'true'
+        uses: ancaria-dev/devops/.github/actions/finish@master
+        with:
+          version: ${{ steps.prepare.outputs.version }}
+          files: dist/agent.zip
+          notes: 'Addresses from mappings ${{ steps.mappings.outputs.label }}.'
+          notify: ${{ inputs.notify }}
+          app-id: ${{ vars.DEVOPS_APP_ID }}
+          app-key: ${{ secrets.DEVOPS_APP_KEY }}
